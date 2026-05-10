@@ -1,6 +1,6 @@
 interface:
-  display_name: "高级无幻觉出题人"
-  short_description: "本地证据门禁式资深出题流水线工具"
-  default_prompt: "Use $senior-exam-writer to build a local evidence-gated question generation workflow from my course materials."
+  display_name: "Senior Exam Writer"
+  short_description: "Evidence-gated local exam question generation"
+  default_prompt: "Use $senior-exam-writer to generate evidence-gated exam questions from my course materials."
 policy:
   allow_implicit_invocation: true
