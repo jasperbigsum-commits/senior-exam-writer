@@ -8,6 +8,7 @@ from typing import Any
 
 from .common import now_iso
 from .dedup import normalized_point_set
+from .validation import validate_task_definition
 
 
 def read_json_arg(value: str | None, label: str) -> Any:
@@ -34,6 +35,15 @@ def create_or_update_task(
     coverage: Any,
     status: str,
 ) -> dict[str, Any]:
+    validate_task_definition(
+        name=name,
+        outline=outline,
+        source_policy=source_policy,
+        question_rules=question_rules,
+        requirements=requirements,
+        coverage=coverage,
+        status=status,
+    )
     existing = conn.execute("SELECT * FROM exam_tasks WHERE id = ?", (task_id,)).fetchone() if task_id else None
     now = now_iso()
     final_id = task_id or str(uuid.uuid4())

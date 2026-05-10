@@ -60,6 +60,11 @@ Use this reference when auditing whether `循证出题官` follows the single-re
 - Owns exam-task records, task JSON loading, reviewer decisions, task status reports, prior generated-item context, and prior knowledge-point duplicate checks.
 - Does not parse documents, insert evidence chunks, or call models.
 
+`scripts/senior_exam_writer_lib/validation.py`
+
+- Owns script-enforced gates for task definitions, ingestion metadata, generation prerequisites, evidence contracts, output contracts, reviewer decisions, and task completion.
+- Does not parse documents, write model prompts, retrieve evidence, or call models.
+
 `scripts/senior_exam_writer_lib/cli.py`
 
 - Owns argparse commands and high-level orchestration.
@@ -76,11 +81,14 @@ The pipeline has explicit handoffs:
 4. Ingestion stores unique sources/chunks and embeddings.
 5. Retrieval produces evidence objects.
 6. Task context supplies outline, source policy, proposition rules, requirements, coverage, and prior knowledge points.
-7. Evidence gate approves or refuses generation.
-8. Generation writes draft JSON from supplied evidence and task context only.
-9. Verification accepts, rewrites, or refuses.
-10. Reviewer decisions are recorded without overwriting the original generation record.
-11. CLI stores the final audit trail.
+7. Validation gates enforce source policy, task policy, duplicate controls, and generation prerequisites.
+8. Evidence gate approves or refuses generation.
+9. Generation writes draft JSON from supplied evidence and task context only.
+10. Verification accepts, rewrites, or refuses.
+11. Output policy validation enforces item structure, coverage, evidence roles, and type-specific fields.
+12. Reviewer decisions are recorded without overwriting the original generation record.
+13. Completion validation marks the task complete only after coverage and review rules pass.
+14. CLI stores the final audit trail.
 
 No module after retrieval may invent or fetch additional facts. No module before verification may declare an item valid.
 
@@ -93,6 +101,9 @@ The Skill is audit-ready when:
 - each evidence chunk has source kind, role, locator, and citation;
 - duplicate chunks are blocked or explicitly allowed by operator choice and recorded when blocked;
 - each item contains assertions, citations, evidence roles, knowledge points, coverage target, style profile, difficulty rationale, de-duplication check, and verification status;
+- the CLI refuses generation without a valid task, required indexed sources, fingerprinted chunks, answer-supporting evidence, and LLM verification;
+- the CLI refuses approval of refused or unverified outputs;
+- the CLI refuses task completion until approved items satisfy coverage and knowledge-point uniqueness;
 - refused generations include missing evidence and strongest retrieved snippets;
 - SQLite `exam_tasks`, `questions`, `question_reviews`, `chunk_fingerprints`, and `ingest_duplicates` preserve task, generation, review, and duplicate-control audit trails.
 

@@ -29,12 +29,23 @@ from .store import connect, ensure_db, init_db
 from .tasks import (
     create_or_update_task,
     duplicate_points_against_prior,
+    get_task,
     list_tasks,
     load_task_context,
     prior_question_context,
     read_json_arg,
     record_review,
     task_status,
+    task_to_json,
+)
+from .validation import (
+    ValidationError,
+    validate_evidence_contract,
+    validate_generation_request,
+    validate_ingest_request,
+    validate_output_contract,
+    validate_review_request,
+    validate_task_completion,
 )
 
 def cmd_init_db(args: argparse.Namespace) -> None:
@@ -50,6 +61,14 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         raise SystemExit(f"no supported files found in {args.input}")
     results = []
     for path in files:
+        validate_ingest_request(
+            input_path=path,
+            kind=args.kind,
+            source_name=args.source_name,
+            url=args.url,
+            published_at=args.published_at,
+            allow_duplicate_chunks=args.allow_duplicate_chunks,
+        )
         print(f"[ingest] {path}", file=sys.stderr)
         result = ingest_file(
             conn,
@@ -89,6 +108,14 @@ def cmd_collect_urls(args: argparse.Namespace) -> None:
     if args.ingest:
         if not args.db:
             raise SystemExit("--ingest requires --db")
+        validate_ingest_request(
+            input_path=Path(args.output_jsonl),
+            kind=args.kind,
+            source_name=args.source_name,
+            url=None,
+            published_at=args.published_at,
+            allow_duplicate_chunks=args.allow_duplicate_chunks,
+        )
         conn = connect(args.db)
         ensure_db(conn)
         ingest_results.append(
@@ -145,6 +172,14 @@ def cmd_generate(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
     task_context = load_task_context(conn, args.task_id)
+    validate_generation_request(
+        conn=conn,
+        task_context=task_context,
+        question_type=args.question_type,
+        count=args.count,
+        difficulty=args.difficulty,
+        llm_verify=args.llm_verify,
+    )
     prior_context = prior_question_context(conn, task_id=args.task_id, limit=args.prior_limit)
     evidence = retrieve_evidence(
         conn,
@@ -155,6 +190,16 @@ def cmd_generate(args: argparse.Namespace) -> None:
         layers={"parent", "content", "overview", "toc"},
     )
     ok, gate = gate_evidence(evidence, args.min_evidence, args.strict_current)
+    if ok:
+        try:
+            validate_evidence_contract(evidence=evidence, task_context=task_context, strict_current=args.strict_current)
+        except ValidationError as exc:
+            ok = False
+            gate = {
+                "ok": False,
+                "issues": gate.get("issues", []) + exc.issues,
+                "usable_evidence": gate.get("usable_evidence", 0),
+            }
     prompt_record = {
         "topic": args.topic,
         "question_type": args.question_type,
@@ -196,6 +241,18 @@ def cmd_generate(args: argparse.Namespace) -> None:
                 if args.llm_verify
                 else verify_static(output, evidence)
             )
+            policy_report = validate_output_contract(
+                output=output,
+                evidence=evidence,
+                task_context=task_context,
+                question_type=args.question_type,
+                count=args.count,
+                difficulty=args.difficulty,
+            )
+            verification["policy"] = policy_report
+            if not policy_report.get("ok"):
+                verification["ok"] = False
+                verification.setdefault("issues", []).extend(policy_report.get("issues", []))
             duplicate_issues = duplicate_points_against_prior(output, prior_context)
             if duplicate_issues:
                 verification["ok"] = False
@@ -222,6 +279,18 @@ def cmd_generate(args: argparse.Namespace) -> None:
                         if args.llm_verify
                         else verify_static(output, evidence)
                     )
+                    policy_report = validate_output_contract(
+                        output=output,
+                        evidence=evidence,
+                        task_context=task_context,
+                        question_type=args.question_type,
+                        count=args.count,
+                        difficulty=args.difficulty,
+                    )
+                    verification["policy"] = policy_report
+                    if not policy_report.get("ok"):
+                        verification["ok"] = False
+                        verification.setdefault("issues", []).extend(policy_report.get("issues", []))
                     duplicate_issues = duplicate_points_against_prior(output, prior_context)
                     if duplicate_issues:
                         verification["ok"] = False
@@ -298,6 +367,12 @@ def cmd_task_status(args: argparse.Namespace) -> None:
 def cmd_review_question(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
+    validate_review_request(
+        conn=conn,
+        question_id=args.question_id,
+        decision=args.decision,
+        notes=args.notes,
+    )
     review = record_review(
         conn,
         question_id=args.question_id,
@@ -307,6 +382,20 @@ def cmd_review_question(args: argparse.Namespace) -> None:
         patch=read_json_arg(args.patch, "patch") if args.patch else {},
     )
     print(json.dumps({"ok": True, "review": review}, ensure_ascii=False, indent=2))
+
+def cmd_complete_task(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    ensure_db(conn)
+    task = task_to_json(get_task(conn, args.task_id))
+    report = validate_task_completion(conn, task)
+    if not report["ok"]:
+        raise ValidationError(report["issues"])
+    conn.execute(
+        "UPDATE exam_tasks SET status = ?, updated_at = ? WHERE id = ?",
+        ("completed", now_iso(), args.task_id),
+    )
+    conn.commit()
+    print(json.dumps({"ok": True, "task_id": args.task_id, "completion": report}, ensure_ascii=False, indent=2))
 
 def cmd_audit_duplicates(args: argparse.Namespace) -> None:
     conn = connect(args.db)
@@ -396,6 +485,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", required=True)
     p.add_argument("--task-id", required=True)
     p.set_defaults(func=cmd_task_status)
+
+    p = sub.add_parser("complete-task", help="mark a task completed only after script-enforced coverage, review, and de-duplication checks pass")
+    p.add_argument("--db", required=True)
+    p.add_argument("--task-id", required=True)
+    p.set_defaults(func=cmd_complete_task)
 
     p = sub.add_parser("collect-urls", help="download URLs, extract text, and write current-affairs JSONL")
     p.add_argument("--url", action="append", help="source URL; repeatable")
@@ -487,6 +581,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         return 130
+    except ValidationError as exc:
+        print(json.dumps({"ok": False, "error": "validation_failed", "issues": exc.issues}, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 1
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1

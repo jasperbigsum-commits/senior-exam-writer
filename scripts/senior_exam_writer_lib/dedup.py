@@ -78,7 +78,7 @@ def find_duplicate_chunk(
     semantic_threshold: float = DEFAULT_SEMANTIC_DEDUP_THRESHOLD,
 ) -> DuplicateMatch | None:
     normalized = normalize_for_dedup(text)
-    if len(normalized) < 24:
+    if not normalized:
         return None
     digest = hashlib.sha256(normalized.encode("utf-8", errors="ignore")).hexdigest()
     exact = conn.execute(
@@ -91,6 +91,8 @@ def find_duplicate_chunk(
     ).fetchone()
     if exact:
         return DuplicateMatch(exact["chunk_id"], 1.0, "exact_normalized_text")
+    if len(normalized) < 24:
+        return None
 
     length = len(normalized)
     low = max(0, int(length * 0.82))
@@ -150,7 +152,7 @@ def record_chunk_fingerprint(
     knowledge_key: str | None = None,
 ) -> None:
     normalized = normalize_for_dedup(text)
-    if len(normalized) < 24:
+    if not normalized:
         return
     conn.execute(
         """

@@ -9,6 +9,8 @@ Use this skill to turn books, handouts, outlines, and current-affairs/current-po
 
 The central rule is: retrieve evidence first, generate second, verify last; refuse when the evidence is not enough.
 
+Core policy is script-enforced. Do not rely on prompt compliance alone: task creation, ingestion, generation, review, and completion all run Python validation gates and fail closed when required metadata, evidence, citations, review decisions, coverage, or de-duplication constraints are missing.
+
 ## Decision Map
 
 - Validate or run the full exam-task lifecycle: read [references/task_workflow.md](references/task_workflow.md).
@@ -136,10 +138,18 @@ python scripts/senior_exam_writer.py review-question \
   --notes "meets outline and evidence rules"
 ```
 
-10. Check completion status before stopping:
+10. Check completion status:
 
 ```bash
 python scripts/senior_exam_writer.py task-status \
+  --db ./exam_evidence.sqlite \
+  --task-id TASK_ID
+```
+
+11. Mark the task complete only through the script gate. This fails if approved items do not satisfy coverage, review, verification, and knowledge-point de-duplication rules.
+
+```bash
+python scripts/senior_exam_writer.py complete-task \
   --db ./exam_evidence.sqlite \
   --task-id TASK_ID
 ```
@@ -157,6 +167,10 @@ python scripts/senior_exam_writer.py task-status \
 - Match item style and difficulty to the retrieved syllabus/outline or textbook chapter expectations; record the difficulty rationale.
 - Prevent knowledge-base pollution: exact or near-duplicate chunks are blocked from the retrieval index by default. Review `ingest_duplicates` before treating repeated sources as independent evidence.
 - Prevent question-set duplication: generated items must include precise `knowledge_points`; `generate --task-id` checks prior task outputs and refuses repeated points.
+- Require `--task-id` and `--llm-verify` for generation. Ad-hoc generation without a task or verifier is blocked by the script.
+- Require source-policy compliance before generation: required source kinds must have indexed chunks, chunk fingerprints must exist, and duplicate fingerprints must be cleaned.
+- Require type-specific item fields: choice items need `option_audit`; short-answer items need `scoring_points`; material-analysis items need `material`.
+- Require reviewer approval before task completion; refused or unverified outputs cannot be approved.
 - Require citations for stem, answer, analysis, and material excerpts.
 - For current-affairs/current-politics素材, prefer white-listed official or user-provided sources, and require source, date, URL or file locator, and review date.
 - Refuse or ask for more material when evidence lacks a clear subject, time, policy wording, institution, or citation locator.
@@ -181,5 +195,6 @@ Keep the script implementation modular:
 - `retrieval.py`: keyword/vector retrieval, parent expansion, and evidence JSON only.
 - `generation.py`: prompt construction, output parsing, refusal, and verification only.
 - `tasks.py`: exam task metadata, reviewer records, coverage status, and prior-question context only.
+- `validation.py`: script-enforced policy gates for tasks, ingestion, evidence, output, review, and completion only.
 - `cli.py`: command-line orchestration only.
 - `senior_exam_writer.py`: thin compatibility wrapper only.

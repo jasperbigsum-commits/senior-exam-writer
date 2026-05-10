@@ -134,6 +134,20 @@ Static verification fails when:
 - answers do not match option labels;
 - item status is neither `ok` nor `refused`.
 
+Script policy verification additionally fails when:
+
+- generation is not bound to a valid task;
+- required source kinds have no indexed chunks;
+- chunk fingerprints are missing or duplicate fingerprints remain;
+- answer evidence is only exam specification, question-bank style, or background current-affairs evidence;
+- `--llm-verify` is not enabled;
+- choice items lack `option_audit` for every option;
+- short-answer items lack cited `scoring_points`;
+- material-analysis items lack `material`;
+- item count, question type, difficulty, or coverage target does not match the task request;
+- a reviewer attempts to approve refused or unverified output;
+- task completion is requested before coverage, approval, and knowledge-point uniqueness pass.
+
 LLM verification fails when:
 
 - a claim is unsupported by cited evidence;

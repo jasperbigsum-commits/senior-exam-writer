@@ -59,27 +59,35 @@ Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdow
    - Q&A sources are labeled as `supplemental_qa_evidence`.
    - Current-affairs/current-politics sources are labeled as `background_current_affairs`.
 
-8. Apply evidence gate.
+8. Apply script policy gates.
+   - Generation must be bound to a valid task.
+   - Required source kinds must have indexed chunks.
+   - Chunks must have fingerprints and no exact duplicate fingerprint groups.
+   - Generation requires answer-supporting evidence from book, handout, notes, or Q&A unless the task explicitly allows pure current-affairs items.
+   - Question-bank and exam-specification evidence cannot be the only factual support.
+   - Local LLM verification must be enabled.
+
+9. Apply evidence gate.
    - Generation is blocked if there are too few usable content or parent evidence chunks.
    - Generation is blocked if evidence lacks citation locators.
    - Strict current-affairs mode requires dated URL or file-located sources.
    - Current-affairs background cannot replace missing course evidence unless the requested task is explicitly a pure current-affairs item.
 
-9. Generate locally.
+10. Generate locally.
    - The question writer receives the topic, generation parameters, retrieved evidence JSON, stored task context, and prior task knowledge points.
    - It must output JSON.
    - It is instructed not to use outside facts or invent missing details.
    - It must include precise `knowledge_points`, `coverage_target`, `style_profile`, `difficulty_rationale`, and `dedup_check`.
    - It must avoid repeating knowledge points from prior unrejected task outputs and from other items in the same batch.
 
-10. Verify.
+11. Verify.
    - Static verification checks schema, citation IDs, assertions, answer keys, and option consistency.
    - Static verification checks required knowledge points and duplicate knowledge points within the same batch.
    - Task-level verification checks repeated knowledge points against prior unrejected generated items.
    - Optional local LLM verification checks whether assertions are supported, contradicted, or absent in the cited evidence.
    - Failed items are rewritten once when enabled; otherwise the run is refused with reasons and strongest evidence snippets.
 
-11. Store audit trail.
+12. Store audit trail.
    - Generation records are stored in SQLite `questions`.
    - Each record stores topic, question type, prompt parameters, evidence JSON, output JSON, verification JSON, status, and timestamp.
    - Exam-task metadata is stored in `exam_tasks`.
@@ -105,5 +113,6 @@ Use these questions when reviewing a run:
 - Does the item avoid prior covered knowledge points for the same task?
 - Does each wrong option have a documented wrong reason?
 - Did the verifier reject unsupported or contradicted claims?
+- Did script policy validation reject missing task, source, fingerprint, type-specific field, or completion requirements?
 - Are current-affairs dates, sources, URLs, and review windows present when needed?
 - Did the human reviewer approve, request revision, or reject the item?

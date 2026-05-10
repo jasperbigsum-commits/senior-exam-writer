@@ -2,6 +2,8 @@
 
 This reference is the end-to-end operating contract for `循证出题官`.
 
+The contract is enforced by scripts. A workflow step that violates required metadata, evidence, verification, review, coverage, or duplicate-control rules must fail closed instead of relying on the model to comply.
+
 ## Inputs
 
 An exam-writing task may include:
@@ -19,6 +21,7 @@ An exam-writing task may include:
 1. Create or update an exam task.
    - Store outline, source policy, proposition rules, requirements, and coverage plan in `exam_tasks`.
    - Use `create-task`; do not leave core requirements only in chat memory.
+   - Script gate: `outline`, `source_policy`, `question_rules`, `requirements`, and `coverage` must be non-empty JSON objects. Citations, review, and knowledge-point de-duplication must be explicitly enabled.
 
 2. Classify and ingest sources.
    - `syllabus` / `outline`: exam scope and cognitive-level calibration.
@@ -36,6 +39,7 @@ An exam-writing task may include:
    - Blocked duplicates are stored in `ingest_duplicates` with source, candidate id, duplicate target, similarity, reason, and sample text.
    - The duplicate source row is kept even when zero chunks are inserted, so provenance remains auditable.
    - This prevents repeated copies from inflating retrieval confidence or polluting evidence.
+   - Script gate: `--allow-duplicate-chunks` is rejected by default policy, missing chunk fingerprints block generation, and duplicate fingerprints block generation until cleaned.
 
 4. Retrieve before generating.
    - Retrieval combines TOC/overview routing, BM25, optional llama.cpp embeddings, and parent-context expansion.
@@ -49,7 +53,9 @@ An exam-writing task may include:
 6. Generate under task constraints.
    - `generate --task-id` passes the stored outline, rules, requirements, coverage plan, and prior accepted/unrejected knowledge points to the writer.
    - Each item must include `knowledge_points`, `coverage_target`, `style_profile`, `difficulty_rationale`, citations, assertions, evidence roles, and `dedup_check`.
+   - Choice items must include `option_audit`; short-answer items must include `scoring_points`; material-analysis items must include `material`.
    - Question-bank sources may guide style and common pitfalls, but generated items must not copy previous items.
+   - Script gate: generation requires `--task-id`, task-valid source policy, indexed required sources, evidence from answer-supporting source kinds, and `--llm-verify`.
 
 7. Verify and reject weak output.
    - Evidence gate blocks thin or unlocatable evidence.
@@ -61,10 +67,12 @@ An exam-writing task may include:
    - The reviewer records `approved`, `revise`, or `rejected` with `review-question`.
    - Rejected questions are excluded from prior accepted coverage; revision requests remain auditable.
    - Reviewer patches may be stored as JSON without overwriting the original generation record.
+   - Script gate: approval is blocked unless the stored question status is `ok`, output status is `ok`, and verification passed.
 
 9. Finish only when task coverage is satisfied.
    - Use `task-status` to inspect source counts, run counts, review decisions, and covered knowledge points.
    - Continue generation until the coverage plan is complete, evidence is sufficient, no repeated knowledge points are present, and reviewer decisions meet the task policy.
+   - Use `complete-task` to mark completion. Script gate: approved item count, per-target coverage, difficulty/type distribution, verification, reviewer approval, and knowledge-point uniqueness must pass.
 
 ## Boundary Rules
 

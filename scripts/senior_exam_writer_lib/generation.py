@@ -33,9 +33,14 @@ def build_generation_prompt(
                 "material": "... optional",
                 "options": [{"label": "A", "text": "...", "citations": ["E1"]}],
                 "answer": "A",
+                "option_audit": [
+                    {"label": "A", "verdict": "correct", "reason": "...", "citations": ["E1"]},
+                    {"label": "B", "verdict": "incorrect", "reason": "...", "citations": ["E2"]},
+                ],
                 "analysis": "...",
                 "citations": ["E1", "E2"],
                 "assertions": [{"claim": "...", "citations": ["E1"]}],
+                "scoring_points": [{"point": "... for short_answer", "citations": ["E1"], "score": 2}],
                 "knowledge_points": ["one precise, non-duplicated tested knowledge point"],
                 "coverage_target": "coverage node or learning objective from task/outline",
                 "difficulty": difficulty,
@@ -73,14 +78,15 @@ def build_generation_prompt(
 3. 不要输出 evidence 中没有的事实。
 4. current_affairs 证据必须保留来源、日期、URL或文件定位；若可能过时，为题目设置 valid_until 或在 analysis 中说明复检要求。
 5. 每道题写 evidence_roles，区分 core 与 background；不要让 background_current_affairs 单独支撑教材知识点答案。
-6. 每道题写 style_profile 和 difficulty_rationale；难度不得只凭感觉，必须说明依据：大纲/章节要求、证据数量、概念关系、推理步数、是否涉及应用或分析。
-7. 出题风格：题干清楚、条件充分、无无意歧义；选项语法平行、长度相近、只有一个最佳答案；解析按证据解释，不写空泛套话。
-8. 每道题必须写 knowledge_points，粒度要精确到“本题实际考查的概念/事实/能力点”，不得写宽泛章节名。
-9. 必须对照 prior_context 避免重复知识点；同一批次内也不能用换一种问法重复考同一知识点。
-10. 如果 evidence 包含 question_bank，只能学习其题型、表述风格、常见考法和易错点；不得照搬原题。
-11. 如果 task_context 给出覆盖计划，优先命中未覆盖节点，并在 coverage_target 中写明。
-12. 只输出 JSON，不要 Markdown。
-13. 语言：{language}。
+6. 选择题必须写 option_audit，逐项说明 correct/incorrect、错因和引用；简答题必须写 scoring_points，逐评分点引用证据；材料分析题必须写 material 且材料来自证据。
+7. 每道题写 style_profile 和 difficulty_rationale；难度不得只凭感觉，必须说明依据：大纲/章节要求、证据数量、概念关系、推理步数、是否涉及应用或分析。
+8. 出题风格：题干清楚、条件充分、无无意歧义；选项语法平行、长度相近、只有一个最佳答案；解析按证据解释，不写空泛套话。
+9. 每道题必须写 knowledge_points，粒度要精确到“本题实际考查的概念/事实/能力点”，不得写宽泛章节名。
+10. 必须对照 prior_context 避免重复知识点；同一批次内也不能用换一种问法重复考同一知识点。
+11. 如果 evidence 包含 question_bank，只能学习其题型、表述风格、常见考法和易错点；不得照搬原题，不得作为 factual support。
+12. 如果 task_context 给出覆盖计划，优先命中未覆盖节点，并在 coverage_target 中写明。
+13. 只输出 JSON，不要 Markdown。
+14. 语言：{language}。
 
 参数：
 - topic: {topic}
@@ -144,6 +150,13 @@ def verify_static(output: dict[str, Any], evidence: list[Evidence]) -> dict[str,
         ]:
             if field not in item:
                 issues.append(f"{prefix}: missing {field}")
+        qtype = output.get("question_type")
+        if qtype in {"single_choice", "multiple_choice"} and "option_audit" not in item:
+            issues.append(f"{prefix}: missing option_audit")
+        if qtype == "short_answer" and "scoring_points" not in item:
+            issues.append(f"{prefix}: missing scoring_points")
+        if qtype == "material_analysis" and not item.get("material"):
+            issues.append(f"{prefix}: material_analysis requires material")
         knowledge_points = item.get("knowledge_points")
         if not isinstance(knowledge_points, list) or not [kp for kp in knowledge_points if str(kp).strip()]:
             issues.append(f"{prefix}: knowledge_points must be a non-empty list")

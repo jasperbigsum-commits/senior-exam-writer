@@ -35,6 +35,7 @@ The database is a local evidence store. It is intentionally simple enough to ins
 `question_reviews`
 
 - stores human reviewer decisions: `approved`, `revise`, or `rejected`, plus reviewer notes and optional patch JSON.
+- the CLI blocks approval unless the stored question run is `ok`, output status is `ok`, and verification passed.
 
 `chunk_fingerprints`
 
@@ -67,3 +68,5 @@ Use `audit-duplicates --backfill` when opening an older database that predates c
 ```bash
 python scripts/senior_exam_writer.py audit-duplicates --db ./exam_evidence.sqlite --backfill
 ```
+
+Generation is blocked when chunks lack fingerprints or exact duplicate fingerprint groups remain.
