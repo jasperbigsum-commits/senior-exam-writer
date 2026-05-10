@@ -13,6 +13,7 @@ The central rule is: retrieve evidence first, generate second, verify last; refu
 
 - Explain how PDF/DOCX materials are processed: read [references/audit_workflow.md](references/audit_workflow.md).
 - Audit item-writing rules and rejection conditions: read [references/question_rules.md](references/question_rules.md).
+- Calibrate style, cognitive level, and difficulty against the syllabus/outline: read [references/style_difficulty.md](references/style_difficulty.md).
 - Add or review current-affairs/current-politics素材: read [references/current_affairs.md](references/current_affairs.md).
 - Download and normalize user-approved URLs into JSONL evidence: use `collect-urls`.
 - Change grounding, citation, or verification behavior: read [references/evidence_gate.md](references/evidence_gate.md).
@@ -98,6 +99,7 @@ python scripts/senior_exam_writer.py generate \
 - Treat books, textbooks, handouts, and outlines as `core_course_evidence`.
 - Treat current-affairs/current-politics素材 as `background_current_affairs` unless the requested item is explicitly a current-affairs item.
 - Do not let current-affairs background alone determine the correct answer for a textbook/course concept.
+- Match item style and difficulty to the retrieved syllabus/outline or textbook chapter expectations; record the difficulty rationale.
 - Require citations for stem, answer, analysis, and material excerpts.
 - For current-affairs/current-politics素材, prefer white-listed official or user-provided sources, and require source, date, URL or file locator, and review date.
 - Refuse or ask for more material when evidence lacks a clear subject, time, policy wording, institution, or citation locator.

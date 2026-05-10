@@ -60,7 +60,13 @@ The writer should return JSON:
         "core": ["E1"],
         "background": ["E2"]
       },
+      "style_profile": {
+        "cognitive_level": "understand",
+        "syllabus_alignment": "chapter/topic expectation",
+        "stem_style": "clear, exam-grade, no trick wording"
+      },
       "difficulty": "medium",
+      "difficulty_rationale": "why this item is easy/medium/hard based on outline and evidence",
       "valid_until": null
     }
   ]
@@ -84,6 +90,8 @@ When refusing:
 - Make distractors plausible but clearly wrong under the evidence.
 - Each distractor should have a wrong reason in the analysis: contradicted, swapped subject, wrong time, wrong scope, overgeneralized, or evidence_not_supported.
 - Avoid testing trivial wording unless the user asks for memorization questions.
+- Keep the stem direct and self-contained. Avoid double negatives, "best except" phrasing, and vague absolutes unless the exam style explicitly requires them.
+- Use options with parallel grammar and comparable length when possible.
 
 ## Multiple-Choice Rules
 
@@ -103,6 +111,7 @@ When refusing:
 - Provide scoring points, not just a model answer.
 - Each scoring point must cite evidence.
 - Keep expected answer scope bounded by retrieved material.
+- Tie scoring points to the requested cognitive level: recall, understand, apply, analyze, evaluate, or create.
 
 ## Verification Rules
 

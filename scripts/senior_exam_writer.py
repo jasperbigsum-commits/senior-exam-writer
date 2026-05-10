@@ -1098,6 +1098,12 @@ def build_generation_prompt(
                 "difficulty": difficulty,
                 "valid_until": None,
                 "evidence_roles": {"core": ["E1"], "background": []},
+                "style_profile": {
+                    "cognitive_level": "understand",
+                    "syllabus_alignment": "cite outline/chapter expectation when available",
+                    "stem_style": "clear, exam-grade, no trick wording",
+                },
+                "difficulty_rationale": "explain why this is easy/medium/hard from outline and evidence",
             }
         ],
     }
@@ -1106,6 +1112,7 @@ def build_generation_prompt(
         "不得使用常识补充事实，不得编造日期、人名、机构、政策、页码、URL或引用。"
         "教材、讲义、书籍、课程大纲证据是 core_course_evidence；时政、热点、政策新闻素材是 background_current_affairs。"
         "除非用户明确要求纯时政题，否则题目考查点必须优先由 core_course_evidence 支撑，background_current_affairs 只能作为材料背景、案例或辅助解释。"
+        "题目风格必须规范、清楚、可考试化；难度必须依据课程大纲、章节要求、证据复杂度和认知层级校准。"
         "证据不足时输出 {\"status\":\"refused\",\"reason\":\"...\",\"missing_evidence\":[...]}。"
     )
     user = f"""
@@ -1117,8 +1124,10 @@ def build_generation_prompt(
 3. 不要输出 evidence 中没有的事实。
 4. current_affairs 证据必须保留来源、日期、URL或文件定位；若可能过时，为题目设置 valid_until 或在 analysis 中说明复检要求。
 5. 每道题写 evidence_roles，区分 core 与 background；不要让 background_current_affairs 单独支撑教材知识点答案。
-6. 只输出 JSON，不要 Markdown。
-7. 语言：{language}。
+6. 每道题写 style_profile 和 difficulty_rationale；难度不得只凭感觉，必须说明依据：大纲/章节要求、证据数量、概念关系、推理步数、是否涉及应用或分析。
+7. 出题风格：题干清楚、条件充分、无无意歧义；选项语法平行、长度相近、只有一个最佳答案；解析按证据解释，不写空泛套话。
+8. 只输出 JSON，不要 Markdown。
+9. 语言：{language}。
 
 参数：
 - topic: {topic}
@@ -1163,9 +1172,18 @@ def verify_static(output: dict[str, Any], evidence: list[Evidence]) -> dict[str,
         return {"ok": False, "mode": "static", "issues": issues}
     for i, item in enumerate(items, 1):
         prefix = f"item {i}"
-        for field in ["stem", "answer", "analysis", "citations", "assertions"]:
+        for field in ["stem", "answer", "analysis", "citations", "assertions", "style_profile", "difficulty_rationale"]:
             if field not in item:
                 issues.append(f"{prefix}: missing {field}")
+        style_profile = item.get("style_profile")
+        if not isinstance(style_profile, dict):
+            issues.append(f"{prefix}: style_profile must be an object")
+        else:
+            for field in ["cognitive_level", "syllabus_alignment", "stem_style"]:
+                if not style_profile.get(field):
+                    issues.append(f"{prefix}: style_profile missing {field}")
+        if not item.get("difficulty_rationale"):
+            issues.append(f"{prefix}: missing difficulty_rationale")
         citations = item.get("citations") or []
         if not isinstance(citations, list) or not citations:
             issues.append(f"{prefix}: citations must be a non-empty list")
