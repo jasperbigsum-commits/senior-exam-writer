@@ -26,6 +26,7 @@ Refuse generation when:
 Every generated item should include:
 
 - `citations`: evidence IDs such as `E1`, `E2`;
+- `evidence_roles`: the cited evidence IDs grouped as `core`, `background`, `specification`, `prior_style`, and `qa`;
 - `assertions`: short factual claims, each with citations;
 - `analysis`: explanation grounded in citations;
 - option-level support when writing choice questions. Wrong options should be contradicted by evidence, out of scope, or explicitly marked as "evidence_not_supported".

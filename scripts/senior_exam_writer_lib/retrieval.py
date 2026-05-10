@@ -9,6 +9,7 @@ import sys
 from typing import Any
 
 from .common import Evidence
+from .evidence_roles import item_role_for_source_kind, role_for_source_kind
 from .llama_cpp_client import llama_embed
 
 def tokenize_query(query: str) -> list[str]:
@@ -201,16 +202,6 @@ def retrieve_evidence(
 def evidence_to_json(evidence: list[Evidence], max_chars: int = 1200) -> list[dict[str, Any]]:
     data = []
     for ev in evidence:
-        if ev.source_kind == "current_affairs":
-            role = "background_current_affairs"
-        elif ev.source_kind in {"outline", "syllabus", "exam_rules", "requirements"}:
-            role = "exam_specification"
-        elif ev.source_kind == "question_bank":
-            role = "prior_question_style"
-        elif ev.source_kind == "qa":
-            role = "supplemental_qa_evidence"
-        else:
-            role = "core_course_evidence"
         data.append(
             {
                 "id": ev.id,
@@ -218,7 +209,8 @@ def evidence_to_json(evidence: list[Evidence], max_chars: int = 1200) -> list[di
                 "layer": ev.layer,
                 "score": ev.score,
                 "source_kind": ev.source_kind,
-                "role": role,
+                "role": role_for_source_kind(ev.source_kind),
+                "item_role": item_role_for_source_kind(ev.source_kind),
                 "citation": ev.citation(),
                 "path": ev.path,
                 "locator": ev.locator,

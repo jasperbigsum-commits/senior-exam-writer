@@ -7,11 +7,17 @@ from typing import Any
 
 from .common import SOURCE_KINDS
 from .dedup import normalized_point_set
+from .evidence_roles import (
+    ITEM_EVIDENCE_ROLE_ORDER,
+    ITEM_EVIDENCE_ROLE_KEYS,
+    SPEC_EVIDENCE_KINDS,
+    item_role_for_source_kind,
+    is_answer_evidence_kind,
+)
+from .source_metadata import current_affairs_metadata_issues
 
 QUESTION_TYPES = {"single_choice", "multiple_choice", "material_analysis", "short_answer"}
 DIFFICULTIES = {"easy", "medium", "hard"}
-ANSWER_EVIDENCE_KINDS = {"book", "handout", "notes", "qa"}
-SPEC_EVIDENCE_KINDS = {"outline", "syllabus", "exam_rules", "requirements"}
 
 
 class ValidationError(ValueError):
@@ -35,6 +41,30 @@ def as_dict(value: Any, label: str, issues: list[str]) -> dict[str, Any]:
 def list_value(data: dict[str, Any], key: str) -> list[Any]:
     value = data.get(key)
     return value if isinstance(value, list) else []
+
+
+def citation_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
+def append_unknown_citation_issues(
+    *,
+    issues: list[str],
+    prefix: str,
+    label: str,
+    citations: Any,
+    evidence_by_id: dict[str, Any],
+) -> list[str]:
+    if not isinstance(citations, list) or not citations:
+        issues.append(f"{prefix}: {label} citations must be a non-empty list")
+        return []
+    normalized = citation_list(citations)
+    unknown = [citation for citation in normalized if citation not in evidence_by_id]
+    if unknown:
+        issues.append(f"{prefix}: {label} contains unknown citations {unknown}")
+    return normalized
 
 
 def validate_task_definition(
@@ -123,26 +153,6 @@ def validate_task_definition(
     require_no_issues(issues)
 
 
-def read_json_records(path: Path) -> list[dict[str, Any]]:
-    if path.suffix.lower() == ".jsonl":
-        records = []
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            item = json.loads(line)
-            if isinstance(item, dict):
-                records.append(item)
-        return records
-    if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        if isinstance(data, dict):
-            return [data]
-        if isinstance(data, list):
-            return [item for item in data if isinstance(item, dict)]
-    return []
-
-
 def validate_ingest_request(
     *,
     input_path: Path,
@@ -158,25 +168,14 @@ def validate_ingest_request(
     if kind not in SOURCE_KINDS:
         issues.append(f"unsupported source kind: {kind}")
     if kind == "current_affairs":
-        records = read_json_records(input_path) if input_path.is_file() else []
-        if records:
-            for idx, record in enumerate(records, 1):
-                has_source = bool(record.get("source") or record.get("source_name") or source_name)
-                has_date = bool(record.get("date") or record.get("published_at") or record.get("publish_date") or published_at)
-                has_locator = bool(record.get("url") or record.get("raw_path") or url)
-                if not has_source:
-                    issues.append(f"current_affairs record {idx} is missing source/source_name")
-                if not has_date:
-                    issues.append(f"current_affairs record {idx} is missing date/published_at")
-                if not has_locator:
-                    issues.append(f"current_affairs record {idx} is missing url/raw_path")
-        else:
-            if not source_name:
-                issues.append("current_affairs ingestion requires --source-name when records do not provide source")
-            if not published_at:
-                issues.append("current_affairs ingestion requires --published-at when records do not provide date")
-            if not url and input_path.suffix.lower() not in {".json", ".jsonl"}:
-                issues.append("current_affairs ingestion requires --url for non-JSON source files")
+        issues.extend(
+            current_affairs_metadata_issues(
+                input_path=input_path,
+                source_name=source_name,
+                url=url,
+                published_at=published_at,
+            )
+        )
     require_no_issues(issues)
 
 
@@ -269,18 +268,6 @@ def validate_generation_request(
     require_no_issues(issues)
 
 
-def evidence_role(source_kind: str) -> str:
-    if source_kind == "current_affairs":
-        return "background_current_affairs"
-    if source_kind in SPEC_EVIDENCE_KINDS:
-        return "exam_specification"
-    if source_kind == "question_bank":
-        return "prior_question_style"
-    if source_kind == "qa":
-        return "supplemental_qa_evidence"
-    return "core_course_evidence"
-
-
 def validate_evidence_contract(
     *,
     evidence: list[Any],
@@ -289,7 +276,7 @@ def validate_evidence_contract(
 ) -> None:
     issues: list[str] = []
     final = [ev for ev in evidence if ev.layer in {"parent", "content"}]
-    answer_support = [ev for ev in final if ev.source_kind in ANSWER_EVIDENCE_KINDS]
+    answer_support = [ev for ev in final if is_answer_evidence_kind(ev.source_kind)]
     policy = (task_context or {}).get("source_policy") or {}
     allow_pure_current = policy.get("allow_pure_current_affairs") is True
     if not answer_support and not allow_pure_current:
@@ -321,15 +308,18 @@ def validate_output_contract(
         return {"ok": True, "mode": "policy", "issues": [], "refused": True}
     if output.get("question_type") != question_type:
         issues.append("output.question_type must match requested question_type")
-    items = output.get("items") or []
-    if isinstance(items, list) and len(items) != count:
+    items = output.get("items")
+    if not isinstance(items, list):
+        issues.append("output.items must be a list")
+        items = []
+    elif len(items) != count:
         issues.append(f"output must contain exactly {count} items")
 
     evidence_by_id = {ev.id: ev for ev in evidence}
     coverage = (task_context or {}).get("coverage") or {}
     allowed_targets = [str(row.get("target")) for row in list_value(coverage, "distribution") if isinstance(row, dict)]
     seen_coverage: set[str] = set()
-    for idx, item in enumerate(items if isinstance(items, list) else [], 1):
+    for idx, item in enumerate(items, 1):
         if not isinstance(item, dict):
             continue
         prefix = f"item {idx}"
@@ -358,9 +348,13 @@ def validate_output_contract(
                     seen_labels.add(label)
                     if not str(option.get("text") or "").strip():
                         issues.append(f"{prefix} option {label or opt_idx}: text is required")
-                    opt_citations = option.get("citations")
-                    if not isinstance(opt_citations, list) or not opt_citations:
-                        issues.append(f"{prefix} option {label or opt_idx}: citations are required")
+                    append_unknown_citation_issues(
+                        issues=issues,
+                        prefix=f"{prefix} option {label or opt_idx}",
+                        label="option",
+                        citations=option.get("citations"),
+                        evidence_by_id=evidence_by_id,
+                    )
             answer = item.get("answer")
             if question_type == "single_choice":
                 if not isinstance(answer, str) or answer not in option_labels:
@@ -388,9 +382,13 @@ def validate_output_contract(
                         issues.append(f"{prefix} option_audit {label}: verdict must be correct or incorrect")
                     if not str(row.get("reason") or "").strip():
                         issues.append(f"{prefix} option_audit {label}: reason is required")
-                    row_citations = row.get("citations")
-                    if not isinstance(row_citations, list) or not row_citations:
-                        issues.append(f"{prefix} option_audit {label}: citations are required")
+                    append_unknown_citation_issues(
+                        issues=issues,
+                        prefix=f"{prefix} option_audit {label}",
+                        label="option_audit",
+                        citations=row.get("citations"),
+                        evidence_by_id=evidence_by_id,
+                    )
         if question_type == "short_answer":
             scoring_points = item.get("scoring_points")
             if not isinstance(scoring_points, list) or not scoring_points:
@@ -402,8 +400,13 @@ def validate_output_contract(
                         continue
                     if not str(point.get("point") or "").strip():
                         issues.append(f"{prefix} scoring_point {point_idx}: point is required")
-                    if not isinstance(point.get("citations"), list) or not point.get("citations"):
-                        issues.append(f"{prefix} scoring_point {point_idx}: citations are required")
+                    append_unknown_citation_issues(
+                        issues=issues,
+                        prefix=f"{prefix} scoring_point {point_idx}",
+                        label="scoring_point",
+                        citations=point.get("citations"),
+                        evidence_by_id=evidence_by_id,
+                    )
         if question_type == "material_analysis" and not str(item.get("material") or "").strip():
             issues.append(f"{prefix}: material_analysis requires material")
         coverage_target = str(item.get("coverage_target") or "")
@@ -413,7 +416,30 @@ def validate_output_contract(
             if coverage_target in seen_coverage:
                 issues.append(f"{prefix}: repeats coverage_target within the same batch")
             seen_coverage.add(coverage_target)
-        citations = [str(c) for c in item.get("citations") or []]
+        citations = append_unknown_citation_issues(
+            issues=issues,
+            prefix=prefix,
+            label="item",
+            citations=item.get("citations"),
+            evidence_by_id=evidence_by_id,
+        )
+        assertions = item.get("assertions")
+        if not isinstance(assertions, list) or not assertions:
+            issues.append(f"{prefix}: assertions must be a non-empty list")
+        else:
+            for assertion_idx, assertion in enumerate(assertions, 1):
+                if not isinstance(assertion, dict):
+                    issues.append(f"{prefix} assertion {assertion_idx}: must be an object")
+                    continue
+                if not str(assertion.get("claim") or "").strip():
+                    issues.append(f"{prefix} assertion {assertion_idx}: claim is required")
+                append_unknown_citation_issues(
+                    issues=issues,
+                    prefix=f"{prefix} assertion {assertion_idx}",
+                    label="assertion",
+                    citations=assertion.get("citations"),
+                    evidence_by_id=evidence_by_id,
+                )
         cited_kinds = {evidence_by_id[c].source_kind for c in citations if c in evidence_by_id}
         if "question_bank" in cited_kinds:
             issues.append(f"{prefix}: question_bank citations are forbidden as factual support")
@@ -425,10 +451,32 @@ def validate_output_contract(
         if not isinstance(roles, dict):
             issues.append(f"{prefix}: evidence_roles must be an object")
         else:
-            allowed_role_keys = {"core", "background", "specification", "prior_style", "qa"}
-            unknown_keys = set(roles) - allowed_role_keys
+            unknown_keys = set(roles) - ITEM_EVIDENCE_ROLE_KEYS
             if unknown_keys:
                 issues.append(f"{prefix}: evidence_roles contains unsupported keys {sorted(unknown_keys)}")
+            missing_keys = [key for key in ITEM_EVIDENCE_ROLE_ORDER if key not in roles]
+            if missing_keys:
+                issues.append(f"{prefix}: evidence_roles missing keys {missing_keys}")
+            role_ids: set[str] = set()
+            for role_key in ITEM_EVIDENCE_ROLE_ORDER:
+                values = roles.get(role_key, [])
+                if not isinstance(values, list):
+                    issues.append(f"{prefix}: evidence_roles.{role_key} must be a list")
+                    continue
+                for evidence_id in citation_list(values):
+                    role_ids.add(evidence_id)
+                    ev = evidence_by_id.get(evidence_id)
+                    if not ev:
+                        issues.append(f"{prefix}: evidence_roles.{role_key} contains unknown evidence id {evidence_id}")
+                        continue
+                    expected_role = item_role_for_source_kind(ev.source_kind)
+                    if expected_role != role_key:
+                        issues.append(
+                            f"{prefix}: evidence_roles.{role_key} misclassifies {evidence_id}; expected {expected_role}"
+                        )
+            missing_role_citations = sorted(set(citations) - role_ids)
+            if missing_role_citations:
+                issues.append(f"{prefix}: evidence_roles must include cited evidence ids {missing_role_citations}")
     return {"ok": not issues, "mode": "policy", "issues": issues}
 
 

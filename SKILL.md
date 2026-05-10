@@ -190,6 +190,8 @@ Keep the script implementation modular:
 - `store.py`: SQLite connection and schema only.
 - `parsing.py`: local file parsing and chunk shaping only.
 - `dedup.py`: text normalization, chunk fingerprints, duplicate blocking, and duplicate audit reporting only.
+- `evidence_roles.py`: source-kind/evidence-role mapping and item evidence role keys only.
+- `source_metadata.py`: JSON/JSONL source metadata inspection only.
 - `collection.py`: URL download and source normalization only.
 - `ingest.py`: source/chunk insertion and embedding attachment only.
 - `retrieval.py`: keyword/vector retrieval, parent expansion, and evidence JSON only.

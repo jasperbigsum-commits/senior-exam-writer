@@ -6,6 +6,7 @@ from typing import Any
 
 from .common import Evidence
 from .dedup import normalized_point_set
+from .evidence_roles import ITEM_EVIDENCE_ROLE_ORDER, ITEM_ROLE_TO_EVIDENCE_ROLE
 from .llama_cpp_client import llama_chat
 from .retrieval import evidence_to_json
 
@@ -22,6 +23,11 @@ def build_generation_prompt(
     ev_json = evidence_to_json(evidence, max_chars=1600)
     task_context = task_context or {}
     prior_context = prior_context or {"items": [], "knowledge_points": []}
+    evidence_roles_shape = {key: [] for key in ITEM_EVIDENCE_ROLE_ORDER}
+    for ev in ev_json[:2]:
+        role_key = ev.get("item_role")
+        if role_key in evidence_roles_shape:
+            evidence_roles_shape[role_key].append(ev["id"])
     schema = {
         "status": "ok",
         "topic": topic,
@@ -45,7 +51,7 @@ def build_generation_prompt(
                 "coverage_target": "coverage node or learning objective from task/outline",
                 "difficulty": difficulty,
                 "valid_until": None,
-                "evidence_roles": {"core": ["E1"], "background": []},
+                "evidence_roles": evidence_roles_shape,
                 "style_profile": {
                     "cognitive_level": "understand",
                     "syllabus_alignment": "cite outline/chapter expectation when available",
@@ -77,7 +83,7 @@ def build_generation_prompt(
 2. 错误选项必须有明确错因：被证据反驳、偷换概念、主体/时间/范围错误，或 evidence_not_supported。
 3. 不要输出 evidence 中没有的事实。
 4. current_affairs 证据必须保留来源、日期、URL或文件定位；若可能过时，为题目设置 valid_until 或在 analysis 中说明复检要求。
-5. 每道题写 evidence_roles，区分 core 与 background；不要让 background_current_affairs 单独支撑教材知识点答案。
+5. 每道题写 evidence_roles，键必须覆盖 core、background、specification、prior_style、qa；每个 evidence id 必须放入与 evidence.role 对应的键。角色映射：{json.dumps(ITEM_ROLE_TO_EVIDENCE_ROLE, ensure_ascii=False)}。不要让 background_current_affairs 单独支撑教材知识点答案；prior_question_style 不得作为 factual support。
 6. 选择题必须写 option_audit，逐项说明 correct/incorrect、错因和引用；简答题必须写 scoring_points，逐评分点引用证据；材料分析题必须写 material 且材料来自证据。
 7. 每道题写 style_profile 和 difficulty_rationale；难度不得只凭感觉，必须说明依据：大纲/章节要求、证据数量、概念关系、推理步数、是否涉及应用或分析。
 8. 出题风格：题干清楚、条件充分、无无意歧义；选项语法平行、长度相近、只有一个最佳答案；解析按证据解释，不写空泛套话。

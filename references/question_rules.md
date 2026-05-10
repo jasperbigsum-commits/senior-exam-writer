@@ -62,7 +62,10 @@ The writer should return JSON:
       "coverage_target": "outline/module/objective node",
       "evidence_roles": {
         "core": ["E1"],
-        "background": ["E2"]
+        "background": ["E2"],
+        "specification": [],
+        "prior_style": [],
+        "qa": []
       },
       "style_profile": {
         "cognitive_level": "understand",
@@ -127,6 +130,7 @@ Static verification fails when:
 
 - required fields are missing;
 - citations point to unknown evidence IDs;
+- item-level `evidence_roles` has missing keys, unknown IDs, IDs assigned to the wrong role, or cited IDs omitted from the role map;
 - assertions lack citations;
 - `knowledge_points`, `coverage_target`, or `dedup_check` are missing;
 - an item repeats a knowledge point already used in the same batch;

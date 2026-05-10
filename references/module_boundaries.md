@@ -31,6 +31,16 @@ Use this reference when auditing whether `循证出题官` follows the single-re
 - Owns text normalization, chunk fingerprints, exact/near-duplicate detection, duplicate audit reports, and knowledge-point normalization.
 - Does not parse documents, retrieve evidence, or generate questions.
 
+`scripts/senior_exam_writer_lib/evidence_roles.py`
+
+- Owns source-kind to evidence-role mapping, item-level evidence role keys, and answer/specification source-kind sets.
+- Does not retrieve evidence, validate full tasks, or write prompts.
+
+`scripts/senior_exam_writer_lib/source_metadata.py`
+
+- Owns JSON/JSONL record inspection for source metadata, especially current-affairs source/date/locator requirements.
+- Does not parse full documents, insert SQLite rows, or judge whether evidence can support an answer.
+
 `scripts/senior_exam_writer_lib/collection.py`
 
 - Owns URL download, HTML metadata extraction, raw source saving, and JSONL normalization.
@@ -99,6 +109,7 @@ The Skill is audit-ready when:
 - every source has a path or URL;
 - current-affairs sources have date/source metadata or are refused in strict mode;
 - each evidence chunk has source kind, role, locator, and citation;
+- each item-level `evidence_roles` object contains only `core`, `background`, `specification`, `prior_style`, and `qa`, and those IDs match the cited evidence source kinds;
 - duplicate chunks are blocked or explicitly allowed by operator choice and recorded when blocked;
 - each item contains assertions, citations, evidence roles, knowledge points, coverage target, style profile, difficulty rationale, de-duplication check, and verification status;
 - the CLI refuses generation without a valid task, required indexed sources, fingerprinted chunks, answer-supporting evidence, and LLM verification;
