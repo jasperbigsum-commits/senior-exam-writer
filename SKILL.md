@@ -12,6 +12,7 @@ Core rule: evidence first, generation second, verification last. If evidence, ci
 ## Decision Map
 
 - End-to-end task flow: read [references/task_workflow.md](references/task_workflow.md).
+- Acceptance testing and scenario evaluation: read [references/acceptance_checklist.md](references/acceptance_checklist.md).
 - PDF/DOCX/source audit details: read [references/audit_workflow.md](references/audit_workflow.md).
 - Question-writing rejection rules: read [references/question_rules.md](references/question_rules.md).
 - Style, cognitive level, and difficulty: read [references/style_difficulty.md](references/style_difficulty.md).
