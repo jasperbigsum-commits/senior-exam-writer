@@ -3,9 +3,11 @@ name: senior-exam-writer
 description: Build and use a local senior exam-writing agent that generates Chinese exam questions only from retrievable evidence. Use when Codex needs to create evidence-gated questions from books, course handouts, DOCX/PDF/Markdown/text materials, outlines, or current-affairs素材, with SQLite indexing, directory/TOC-driven hierarchical retrieval, local llama.cpp embeddings, local llama.cpp generation, citations, refusal on weak evidence, and post-generation verification to avoid hallucinations.
 ---
 
-# Senior Exam Writer
+# 循证出题官
 
-Use this skill to turn books, handouts, outlines, and current-affairs素材 into a local, evidence-gated question-writing workflow. The central rule is: retrieve evidence first, generate second, verify last; refuse when the evidence is not enough.
+Use this skill to turn books, handouts, outlines, and current-affairs素材 into a local, evidence-gated question-writing workflow. The technical skill id remains `senior-exam-writer`; the user-facing name is `循证出题官`.
+
+The central rule is: retrieve evidence first, generate second, verify last; refuse when the evidence is not enough.
 
 ## Workflow
 
@@ -61,6 +63,8 @@ python scripts/senior_exam_writer.py generate \
 - After generation, verify every key assertion against cited evidence. Rewrite once if verification fails; otherwise return a refusal report.
 
 Read [references/evidence_gate.md](references/evidence_gate.md) before changing gating, citation, or verification behavior.
+Read [references/audit_workflow.md](references/audit_workflow.md) when explaining how PDF/DOCX materials are processed.
+Read [references/question_rules.md](references/question_rules.md) when auditing item-writing rules, output schema, and rejection rules.
 Read [references/llama_cpp.md](references/llama_cpp.md) when configuring local embedding or generation models.
 Read [references/sqlite_schema.md](references/sqlite_schema.md) when inspecting or extending the database.
 

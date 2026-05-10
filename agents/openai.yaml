@@ -1,6 +1,6 @@
 interface:
-  display_name: "Senior Exam Writer"
-  short_description: "Evidence-gated local exam question generation"
-  default_prompt: "Use $senior-exam-writer to generate evidence-gated exam questions from my course materials."
+  display_name: "循证出题官"
+  short_description: "Audit-friendly evidence-gated exam generation"
+  default_prompt: "Use $senior-exam-writer to ingest my PDF or DOCX materials, explain the evidence workflow, and generate auditable exam questions."
 policy:
   allow_implicit_invocation: true
