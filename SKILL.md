@@ -1,15 +1,24 @@
 ---
 name: senior-exam-writer
-description: Build and use a local senior exam-writing agent that generates Chinese exam questions only from retrievable evidence. Use when Codex needs to create evidence-gated questions from books, course handouts, DOCX/PDF/Markdown/text materials, outlines, or current-affairs素材, with SQLite indexing, directory/TOC-driven hierarchical retrieval, local llama.cpp embeddings, local llama.cpp generation, citations, refusal on weak evidence, and post-generation verification to avoid hallucinations.
+description: Build and use a local evidence-gated Chinese exam-question agent named 循证出题官. Use when Codex needs to ingest PDF/DOCX/Markdown/EPUB/text course materials, books, outlines, or current-affairs/current-politics素材; build a SQLite evidence store; perform TOC-driven hierarchical retrieval; separate core course evidence from background current-affairs evidence; use local llama.cpp embeddings and local generation; require citations; refuse weak evidence; and verify outputs for hallucination control.
 ---
 
 # 循证出题官
 
-Use this skill to turn books, handouts, outlines, and current-affairs素材 into a local, evidence-gated question-writing workflow. The technical skill id remains `senior-exam-writer`; the user-facing name is `循证出题官`.
+Use this skill to turn books, handouts, outlines, and current-affairs/current-politics素材 into a local, evidence-gated question-writing workflow. The technical skill id remains `senior-exam-writer`; the user-facing name is `循证出题官`.
 
 The central rule is: retrieve evidence first, generate second, verify last; refuse when the evidence is not enough.
 
-## Workflow
+## Decision Map
+
+- Explain how PDF/DOCX materials are processed: read [references/audit_workflow.md](references/audit_workflow.md).
+- Audit item-writing rules and rejection conditions: read [references/question_rules.md](references/question_rules.md).
+- Add or review current-affairs/current-politics素材: read [references/current_affairs.md](references/current_affairs.md).
+- Change grounding, citation, or verification behavior: read [references/evidence_gate.md](references/evidence_gate.md).
+- Configure local embedding/generation: read [references/llama_cpp.md](references/llama_cpp.md).
+- Inspect or extend SQLite tables: read [references/sqlite_schema.md](references/sqlite_schema.md).
+
+## Standard Workflow
 
 1. Create a SQLite evidence database:
 
@@ -17,7 +26,7 @@ The central rule is: retrieve evidence first, generate second, verify last; refu
 python scripts/senior_exam_writer.py init-db --db ./exam_evidence.sqlite
 ```
 
-2. Ingest source files. Prefer `--embed` with a local llama.cpp embedding server; use `--no-embed` only for BM25-only indexing or offline testing.
+2. Ingest course materials. Prefer `--embed` with a local llama.cpp embedding server; use `--no-embed` only for BM25-only indexing or offline testing.
 
 ```bash
 python scripts/senior_exam_writer.py ingest \
@@ -28,7 +37,20 @@ python scripts/senior_exam_writer.py ingest \
   --embed-url http://127.0.0.1:8081
 ```
 
-3. Inspect retrieval before generating:
+3. Ingest dated current-affairs or current-politics素材 when it is used as background or auxiliary material:
+
+```bash
+python scripts/senior_exam_writer.py ingest \
+  --db ./exam_evidence.sqlite \
+  --input ./current_affairs.jsonl \
+  --kind current_affairs \
+  --source-name "official/user-approved source" \
+  --published-at 2026-05-10 \
+  --embed \
+  --embed-url http://127.0.0.1:8081
+```
+
+4. Inspect retrieval before generating:
 
 ```bash
 python scripts/senior_exam_writer.py retrieve \
@@ -38,7 +60,7 @@ python scripts/senior_exam_writer.py retrieve \
   --embed-url http://127.0.0.1:8081
 ```
 
-4. Generate questions locally with evidence gate and verification:
+5. Generate questions locally with evidence gate and verification:
 
 ```bash
 python scripts/senior_exam_writer.py generate \
@@ -50,6 +72,7 @@ python scripts/senior_exam_writer.py generate \
   --llm-url http://127.0.0.1:8080 \
   --embed-url http://127.0.0.1:8081 \
   --min-evidence 3 \
+  --strict-current \
   --llm-verify
 ```
 
@@ -57,16 +80,13 @@ python scripts/senior_exam_writer.py generate \
 
 - Treat TOC/目录 and overview/导论 chunks as routers, not as final proof unless the question only asks about structure.
 - Use content chunks and their parent section context as final evidence.
+- Treat books, textbooks, handouts, and outlines as `core_course_evidence`.
+- Treat current-affairs/current-politics素材 as `background_current_affairs` unless the requested item is explicitly a current-affairs item.
+- Do not let current-affairs background alone determine the correct answer for a textbook/course concept.
 - Require citations for stem, answer, analysis, and material excerpts.
-- For current-affairs素材, prefer white-listed official or user-provided sources, and require source, date, URL or file locator, and review date.
+- For current-affairs/current-politics素材, prefer white-listed official or user-provided sources, and require source, date, URL or file locator, and review date.
 - Refuse or ask for more material when evidence lacks a clear subject, time, policy wording, institution, or citation locator.
 - After generation, verify every key assertion against cited evidence. Rewrite once if verification fails; otherwise return a refusal report.
-
-Read [references/evidence_gate.md](references/evidence_gate.md) before changing gating, citation, or verification behavior.
-Read [references/audit_workflow.md](references/audit_workflow.md) when explaining how PDF/DOCX materials are processed.
-Read [references/question_rules.md](references/question_rules.md) when auditing item-writing rules, output schema, and rejection rules.
-Read [references/llama_cpp.md](references/llama_cpp.md) when configuring local embedding or generation models.
-Read [references/sqlite_schema.md](references/sqlite_schema.md) when inspecting or extending the database.
 
 ## Output Expectations
 

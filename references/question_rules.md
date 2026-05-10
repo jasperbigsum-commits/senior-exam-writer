@@ -9,6 +9,7 @@ Use this reference to audit how `循证出题官` decides whether a question is 
 - Do not use general model knowledge to fill gaps.
 - Refuse when evidence is too thin, contradictory, stale, undated, or unlocatable.
 - Make every key assertion cite one or more evidence IDs.
+- Separate `core_course_evidence` from `background_current_affairs` in the item audit trail.
 - Prefer a refusal report over a fluent unsupported question.
 
 ## Evidence Sufficiency
@@ -22,6 +23,15 @@ Evidence is sufficient only when it covers:
 - date and URL/file locator for current-affairs material when applicable.
 
 Overview and TOC chunks are not normally enough. They may support routing, syllabus-structure questions, or table-of-contents questions, but final conceptual or factual questions should cite parent/content chunks.
+
+Current-affairs/current-politics素材 can be used as:
+
+- background material in a stem;
+- a case for applying a textbook concept;
+- a dated policy or event fact in a pure current-affairs question;
+- a contrast with textbook theory, if both sides are separately cited.
+
+It must not be used to silently update or override textbook/course claims. If a current event changes a course claim, the item must explicitly ask about the change and cite both the course source and the current source.
 
 ## Question Package Schema
 
@@ -46,6 +56,10 @@ The writer should return JSON:
       "assertions": [
         {"claim": "short factual claim", "citations": ["E1"]}
       ],
+      "evidence_roles": {
+        "core": ["E1"],
+        "background": ["E2"]
+      },
       "difficulty": "medium",
       "valid_until": null
     }
@@ -107,3 +121,4 @@ LLM verification fails when:
 - the answer key is inconsistent with the analysis;
 - an option explanation relies on outside facts;
 - current-affairs claims lack date/source/URL or review window when needed.
+- background evidence alone supports a non-current-affairs answer key.

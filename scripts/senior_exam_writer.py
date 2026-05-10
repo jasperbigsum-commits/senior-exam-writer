@@ -62,6 +62,7 @@ class Evidence:
     locator: str
     text: str
     score: float
+    source_kind: str
     source_title: str
     source_path: str
     source_name: str | None
@@ -734,7 +735,7 @@ def retrieve_evidence(
     try:
         route_rows = conn.execute(
             """
-            SELECT c.*, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at,
+            SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at,
                    bm25(chunks_fts) AS bm25_rank
             FROM chunks_fts
             JOIN chunks c ON c.id = chunks_fts.chunk_id
@@ -758,7 +759,7 @@ def retrieve_evidence(
     try:
         rows = conn.execute(
             """
-            SELECT c.*, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at,
+            SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at,
                    bm25(chunks_fts) AS bm25_rank
             FROM chunks_fts
             JOIN chunks c ON c.id = chunks_fts.chunk_id
@@ -779,7 +780,7 @@ def retrieve_evidence(
 
     rows = conn.execute(
         """
-        SELECT c.*, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at
+        SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at
         FROM chunks c
         JOIN sources s ON s.id = c.source_id
         WHERE c.layer IN ('parent', 'content')
@@ -816,7 +817,7 @@ def retrieve_evidence(
         if row["layer"] == "content" and row["parent_id"]:
             parent = conn.execute(
                 """
-                SELECT c.*, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at
+                SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at
                 FROM chunks c
                 JOIN sources s ON s.id = c.source_id
                 WHERE c.id = ?
@@ -853,6 +854,7 @@ def retrieve_evidence(
                 score=round(float(item["score"]), 4),
                 source_title=row["source_title"] or "",
                 source_path=row["source_path"] or "",
+                source_kind=row["kind"],
                 source_name=row["source_name"],
                 source_url=row["url"],
                 published_at=row["published_at"],
@@ -872,6 +874,8 @@ def evidence_to_json(evidence: list[Evidence], max_chars: int = 1200) -> list[di
                 "chunk_id": ev.chunk_id,
                 "layer": ev.layer,
                 "score": ev.score,
+                "source_kind": ev.source_kind,
+                "role": "background_current_affairs" if ev.source_kind == "current_affairs" else "core_course_evidence",
                 "citation": ev.citation(),
                 "path": ev.path,
                 "locator": ev.locator,
@@ -925,12 +929,15 @@ def build_generation_prompt(
                 "assertions": [{"claim": "...", "citations": ["E1"]}],
                 "difficulty": difficulty,
                 "valid_until": None,
+                "evidence_roles": {"core": ["E1"], "background": []},
             }
         ],
     }
     system = (
         "你是资深出题人和严格事实核验员。只能使用用户提供的 evidence JSON 出题。"
         "不得使用常识补充事实，不得编造日期、人名、机构、政策、页码、URL或引用。"
+        "教材、讲义、书籍、课程大纲证据是 core_course_evidence；时政、热点、政策新闻素材是 background_current_affairs。"
+        "除非用户明确要求纯时政题，否则题目考查点必须优先由 core_course_evidence 支撑，background_current_affairs 只能作为材料背景、案例或辅助解释。"
         "证据不足时输出 {\"status\":\"refused\",\"reason\":\"...\",\"missing_evidence\":[...]}。"
     )
     user = f"""
@@ -940,8 +947,10 @@ def build_generation_prompt(
 1. 题干、答案、解析、材料和每个关键断言都必须引用 evidence id。
 2. 错误选项必须有明确错因：被证据反驳、偷换概念、主体/时间/范围错误，或 evidence_not_supported。
 3. 不要输出 evidence 中没有的事实。
-4. 只输出 JSON，不要 Markdown。
-5. 语言：{language}。
+4. current_affairs 证据必须保留来源、日期、URL或文件定位；若可能过时，为题目设置 valid_until 或在 analysis 中说明复检要求。
+5. 每道题写 evidence_roles，区分 core 与 background；不要让 background_current_affairs 单独支撑教材知识点答案。
+6. 只输出 JSON，不要 Markdown。
+7. 语言：{language}。
 
 参数：
 - topic: {topic}

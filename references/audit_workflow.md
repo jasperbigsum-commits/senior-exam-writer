@@ -1,6 +1,6 @@
 # Audit Workflow
 
-Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdown, EPUB, text, JSON, or JSONL material package before it writes questions.
+Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdown, EPUB, text, JSON, JSONL, or current-affairs/current-politics material package before it writes questions.
 
 ## Processing Flow
 
@@ -39,11 +39,14 @@ Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdow
    - Content chunks find precise matches.
    - Parent chunks expand context so the writer does not rely on isolated fragments.
    - Retrieved chunks become evidence IDs such as `E1`, `E2`, `E3`.
+   - Course sources are labeled as `core_course_evidence`.
+   - Current-affairs/current-politics sources are labeled as `background_current_affairs`.
 
 7. Apply evidence gate.
    - Generation is blocked if there are too few usable content or parent evidence chunks.
    - Generation is blocked if evidence lacks citation locators.
    - Strict current-affairs mode requires dated URL or file-located sources.
+   - Current-affairs background cannot replace missing course evidence unless the requested task is explicitly a pure current-affairs item.
 
 8. Generate locally.
    - The question writer receives only the topic, generation parameters, and retrieved evidence JSON.
@@ -67,6 +70,8 @@ Use these questions when reviewing a run:
 - Did extraction preserve enough heading/page/paragraph location?
 - Are overview and TOC used only for routing unless the item tests document structure?
 - Are final citations drawn from content or parent chunks?
+- Are course claims supported by `core_course_evidence` rather than only background素材?
+- Are current-affairs/current-politics sources dated, sourced, and reviewable?
 - Does every factual claim map to evidence IDs?
 - Does each wrong option have a documented wrong reason?
 - Did the verifier reject unsupported or contradicted claims?
