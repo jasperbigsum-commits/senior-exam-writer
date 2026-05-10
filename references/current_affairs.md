@@ -25,6 +25,20 @@ Prefer sources chosen by the user or a course owner:
 
 Avoid unsourced summaries, screenshots without provenance, social posts without original source, or model-generated summaries that do not cite original text.
 
+## Supplementing Sources
+
+When the existing material package lacks enough current-affairs background, Codex may help supplement sources, but the collection must remain auditable:
+
+1. Clarify the topic, timeframe, jurisdiction, and allowed source classes.
+2. Search or browse for candidate primary/authoritative sources when internet access is available.
+3. Prefer official or course-approved URLs; record rejected sources when the choice is non-obvious.
+4. Use `collect-urls` to download and normalize approved URLs into JSONL.
+5. Ingest the JSONL as `--kind current_affairs`.
+6. Retrieve and inspect evidence before generation.
+7. Use `--strict-current` for time-sensitive topics.
+
+Do not silently add web facts to a question. If a fact is not in the collected JSONL or another ingested source, it is not available for generation.
+
 ## Required Fields
 
 For each current-affairs item, store as many of these as possible:
@@ -56,6 +70,24 @@ python scripts/senior_exam_writer.py ingest \
   --published-at 2026-05-10 \
   --embed
 ```
+
+Collect and ingest URLs example:
+
+```bash
+python scripts/senior_exam_writer.py collect-urls \
+  --url https://example.gov/item \
+  --url https://example.edu/background \
+  --query "topic search context" \
+  --tag current_affairs \
+  --tag policy \
+  --output-jsonl ./current_affairs_collected.jsonl \
+  --out-dir ./collected_sources \
+  --db ./exam_evidence.sqlite \
+  --ingest \
+  --embed
+```
+
+The generated JSONL records include `retrieval_query`, `retrieved_at`, `raw_path`, `content_type`, URL, source, date when detected, and extracted text.
 
 ## Freshness Rules
 

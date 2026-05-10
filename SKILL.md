@@ -14,6 +14,7 @@ The central rule is: retrieve evidence first, generate second, verify last; refu
 - Explain how PDF/DOCX materials are processed: read [references/audit_workflow.md](references/audit_workflow.md).
 - Audit item-writing rules and rejection conditions: read [references/question_rules.md](references/question_rules.md).
 - Add or review current-affairs/current-politics素材: read [references/current_affairs.md](references/current_affairs.md).
+- Download and normalize user-approved URLs into JSONL evidence: use `collect-urls`.
 - Change grounding, citation, or verification behavior: read [references/evidence_gate.md](references/evidence_gate.md).
 - Configure local embedding/generation: read [references/llama_cpp.md](references/llama_cpp.md).
 - Inspect or extend SQLite tables: read [references/sqlite_schema.md](references/sqlite_schema.md).
@@ -50,7 +51,21 @@ python scripts/senior_exam_writer.py ingest \
   --embed-url http://127.0.0.1:8081
 ```
 
-4. Inspect retrieval before generating:
+4. When URL sources are provided or discovered, collect them into an auditable JSONL before ingestion:
+
+```bash
+python scripts/senior_exam_writer.py collect-urls \
+  --url https://example.gov/policy-page \
+  --query "course topic + policy background" \
+  --tag current_affairs \
+  --output-jsonl ./current_affairs_collected.jsonl \
+  --out-dir ./collected_sources \
+  --db ./exam_evidence.sqlite \
+  --ingest \
+  --embed
+```
+
+5. Inspect retrieval before generating:
 
 ```bash
 python scripts/senior_exam_writer.py retrieve \
@@ -60,7 +75,7 @@ python scripts/senior_exam_writer.py retrieve \
   --embed-url http://127.0.0.1:8081
 ```
 
-5. Generate questions locally with evidence gate and verification:
+6. Generate questions locally with evidence gate and verification:
 
 ```bash
 python scripts/senior_exam_writer.py generate \
