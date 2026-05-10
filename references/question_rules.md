@@ -10,6 +10,8 @@ Use this reference to audit how `循证出题官` decides whether a question is 
 - Refuse when evidence is too thin, contradictory, stale, undated, or unlocatable.
 - Make every key assertion cite one or more evidence IDs.
 - Separate `core_course_evidence` from `background_current_affairs` in the item audit trail.
+- Separate exam specifications, prior question-bank style evidence, supplemental Q&A evidence, and core course evidence.
+- Declare precise `knowledge_points` for every item and avoid repeating them within a batch or an exam task.
 - Prefer a refusal report over a fluent unsupported question.
 
 ## Evidence Sufficiency
@@ -56,6 +58,8 @@ The writer should return JSON:
       "assertions": [
         {"claim": "short factual claim", "citations": ["E1"]}
       ],
+      "knowledge_points": ["precise tested concept or fact"],
+      "coverage_target": "outline/module/objective node",
       "evidence_roles": {
         "core": ["E1"],
         "background": ["E2"]
@@ -67,6 +71,10 @@ The writer should return JSON:
       },
       "difficulty": "medium",
       "difficulty_rationale": "why this item is easy/medium/hard based on outline and evidence",
+      "dedup_check": {
+        "against_prior_task_items": "why this does not repeat a prior covered point",
+        "within_batch": "why this item is distinct from sibling items"
+      },
       "valid_until": null
     }
   ]
@@ -120,6 +128,9 @@ Static verification fails when:
 - required fields are missing;
 - citations point to unknown evidence IDs;
 - assertions lack citations;
+- `knowledge_points`, `coverage_target`, or `dedup_check` are missing;
+- an item repeats a knowledge point already used in the same batch;
+- a task-bound item repeats a prior unrejected knowledge point;
 - answers do not match option labels;
 - item status is neither `ok` nor `refused`.
 

@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from .common import Evidence
+from .dedup import normalized_point_set
 from .llama_cpp_client import llama_chat
 from .retrieval import evidence_to_json
 
@@ -15,8 +16,12 @@ def build_generation_prompt(
     difficulty: str,
     evidence: list[Evidence],
     language: str,
+    task_context: dict[str, Any] | None = None,
+    prior_context: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     ev_json = evidence_to_json(evidence, max_chars=1600)
+    task_context = task_context or {}
+    prior_context = prior_context or {"items": [], "knowledge_points": []}
     schema = {
         "status": "ok",
         "topic": topic,
@@ -31,6 +36,8 @@ def build_generation_prompt(
                 "analysis": "...",
                 "citations": ["E1", "E2"],
                 "assertions": [{"claim": "...", "citations": ["E1"]}],
+                "knowledge_points": ["one precise, non-duplicated tested knowledge point"],
+                "coverage_target": "coverage node or learning objective from task/outline",
                 "difficulty": difficulty,
                 "valid_until": None,
                 "evidence_roles": {"core": ["E1"], "background": []},
@@ -40,14 +47,20 @@ def build_generation_prompt(
                     "stem_style": "clear, exam-grade, no trick wording",
                 },
                 "difficulty_rationale": "explain why this is easy/medium/hard from outline and evidence",
+                "dedup_check": {
+                    "against_prior_task_items": "state why this item does not repeat prior knowledge_points",
+                    "within_batch": "state why this item is distinct from other generated items",
+                },
             }
         ],
     }
     system = (
         "你是资深出题人和严格事实核验员。只能使用用户提供的 evidence JSON 出题。"
         "不得使用常识补充事实，不得编造日期、人名、机构、政策、页码、URL或引用。"
-        "教材、讲义、书籍、课程大纲证据是 core_course_evidence；时政、热点、政策新闻素材是 background_current_affairs。"
+        "教材、讲义、书籍、课程笔记是 core_course_evidence；大纲、考试规范、命题规则、额外要求是 exam_specification；题库样例是 prior_question_style；知识问答是 supplemental_qa_evidence；时政、热点、政策新闻素材是 background_current_affairs。"
         "除非用户明确要求纯时政题，否则题目考查点必须优先由 core_course_evidence 支撑，background_current_affairs 只能作为材料背景、案例或辅助解释。"
+        "考试大纲、命题规则、题库样例、用户额外要求会在 task_context 中给出；必须服从其中的题型、风格、难度、覆盖范围和来源约束。"
+        "不要重复 task_context 或 prior_context 中已经覆盖的知识点；如无法避免重复，输出 refused JSON 并说明重复风险。"
         "题目风格必须规范、清楚、可考试化；难度必须依据课程大纲、章节要求、证据复杂度和认知层级校准。"
         "证据不足时输出 {\"status\":\"refused\",\"reason\":\"...\",\"missing_evidence\":[...]}。"
     )
@@ -62,8 +75,12 @@ def build_generation_prompt(
 5. 每道题写 evidence_roles，区分 core 与 background；不要让 background_current_affairs 单独支撑教材知识点答案。
 6. 每道题写 style_profile 和 difficulty_rationale；难度不得只凭感觉，必须说明依据：大纲/章节要求、证据数量、概念关系、推理步数、是否涉及应用或分析。
 7. 出题风格：题干清楚、条件充分、无无意歧义；选项语法平行、长度相近、只有一个最佳答案；解析按证据解释，不写空泛套话。
-8. 只输出 JSON，不要 Markdown。
-9. 语言：{language}。
+8. 每道题必须写 knowledge_points，粒度要精确到“本题实际考查的概念/事实/能力点”，不得写宽泛章节名。
+9. 必须对照 prior_context 避免重复知识点；同一批次内也不能用换一种问法重复考同一知识点。
+10. 如果 evidence 包含 question_bank，只能学习其题型、表述风格、常见考法和易错点；不得照搬原题。
+11. 如果 task_context 给出覆盖计划，优先命中未覆盖节点，并在 coverage_target 中写明。
+12. 只输出 JSON，不要 Markdown。
+13. 语言：{language}。
 
 参数：
 - topic: {topic}
@@ -76,6 +93,12 @@ def build_generation_prompt(
 
 evidence:
 {json.dumps(ev_json, ensure_ascii=False, indent=2)}
+
+task_context:
+{json.dumps(task_context, ensure_ascii=False, indent=2)}
+
+prior_context:
+{json.dumps(prior_context, ensure_ascii=False, indent=2)}
 """.strip()
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -104,11 +127,39 @@ def verify_static(output: dict[str, Any], evidence: list[Evidence]) -> dict[str,
     if not isinstance(items, list) or not items:
         issues.append("items must be a non-empty list")
         return {"ok": False, "mode": "static", "issues": issues}
+    seen_points: set[str] = set()
     for i, item in enumerate(items, 1):
         prefix = f"item {i}"
-        for field in ["stem", "answer", "analysis", "citations", "assertions", "style_profile", "difficulty_rationale"]:
+        for field in [
+            "stem",
+            "answer",
+            "analysis",
+            "citations",
+            "assertions",
+            "knowledge_points",
+            "coverage_target",
+            "style_profile",
+            "difficulty_rationale",
+            "dedup_check",
+        ]:
             if field not in item:
                 issues.append(f"{prefix}: missing {field}")
+        knowledge_points = item.get("knowledge_points")
+        if not isinstance(knowledge_points, list) or not [kp for kp in knowledge_points if str(kp).strip()]:
+            issues.append(f"{prefix}: knowledge_points must be a non-empty list")
+        else:
+            normalized_points = normalized_point_set([str(point) for point in knowledge_points])
+            repeated = normalized_points & seen_points
+            if repeated:
+                issues.append(f"{prefix}: repeats knowledge_points within the same batch")
+            seen_points |= normalized_points
+        dedup_check = item.get("dedup_check")
+        if not isinstance(dedup_check, dict):
+            issues.append(f"{prefix}: dedup_check must be an object")
+        else:
+            for field in ["against_prior_task_items", "within_batch"]:
+                if not dedup_check.get(field):
+                    issues.append(f"{prefix}: dedup_check missing {field}")
         style_profile = item.get("style_profile")
         if not isinstance(style_profile, dict):
             issues.append(f"{prefix}: style_profile must be an object")
@@ -213,8 +264,19 @@ def rewrite_once(
     language: str,
     llm_url: str,
     llm_model: str,
+    task_context: dict[str, Any] | None = None,
+    prior_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    messages = build_generation_prompt(topic, question_type, count, difficulty, evidence, language)
+    messages = build_generation_prompt(
+        topic,
+        question_type,
+        count,
+        difficulty,
+        evidence,
+        language,
+        task_context=task_context,
+        prior_context=prior_context,
+    )
     messages.append(
         {
             "role": "user",
@@ -231,4 +293,3 @@ def rewrite_once(
     if not isinstance(parsed, dict):
         raise RuntimeError("rewrite returned non-object JSON")
     return parsed
-

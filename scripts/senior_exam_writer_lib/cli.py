@@ -11,12 +11,31 @@ from pathlib import Path
 from typing import Any
 
 from .collection import collect_urls, read_url_list
-from .common import DEFAULT_EMBED_MODEL, DEFAULT_EMBED_URL, DEFAULT_LLM_MODEL, DEFAULT_LLM_URL, DEFAULT_USER_AGENT, now_iso
+from .common import (
+    DEFAULT_EMBED_MODEL,
+    DEFAULT_EMBED_URL,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_URL,
+    DEFAULT_USER_AGENT,
+    SOURCE_KINDS,
+    now_iso,
+)
+from .dedup import audit_duplicate_fingerprints, backfill_missing_fingerprints
 from .generation import build_generation_prompt, extract_json, refusal, rewrite_once, verify_static, verify_with_llm
 from .ingest import collect_files, ingest_file
 from .llama_cpp_client import llama_chat
 from .retrieval import evidence_to_json, gate_evidence, retrieve_evidence
 from .store import connect, ensure_db, init_db
+from .tasks import (
+    create_or_update_task,
+    duplicate_points_against_prior,
+    list_tasks,
+    load_task_context,
+    prior_question_context,
+    read_json_arg,
+    record_review,
+    task_status,
+)
 
 def cmd_init_db(args: argparse.Namespace) -> None:
     conn = connect(args.db)
@@ -45,6 +64,9 @@ def cmd_ingest(args: argparse.Namespace) -> None:
             embed_url=args.embed_url,
             embed_model=args.embed_model,
             max_chars=args.max_chars,
+            dedup=not args.allow_duplicate_chunks,
+            dedup_threshold=args.dedup_threshold,
+            semantic_dedup_threshold=args.semantic_dedup_threshold,
         )
         results.append(result)
     print(json.dumps({"ok": True, "files": len(files), "results": results}, ensure_ascii=False, indent=2))
@@ -73,7 +95,7 @@ def cmd_collect_urls(args: argparse.Namespace) -> None:
             ingest_file(
                 conn,
                 Path(args.output_jsonl),
-                kind="current_affairs",
+                kind=args.kind,
                 title=args.title,
                 source_name=args.source_name,
                 url=None,
@@ -83,6 +105,9 @@ def cmd_collect_urls(args: argparse.Namespace) -> None:
                 embed_url=args.embed_url,
                 embed_model=args.embed_model,
                 max_chars=args.max_chars,
+                dedup=not args.allow_duplicate_chunks,
+                dedup_threshold=args.dedup_threshold,
+                semantic_dedup_threshold=args.semantic_dedup_threshold,
             )
         )
     print(
@@ -119,6 +144,8 @@ def cmd_retrieve(args: argparse.Namespace) -> None:
 def cmd_generate(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
+    task_context = load_task_context(conn, args.task_id)
+    prior_context = prior_question_context(conn, task_id=args.task_id, limit=args.prior_limit)
     evidence = retrieve_evidence(
         conn,
         args.topic,
@@ -135,13 +162,25 @@ def cmd_generate(args: argparse.Namespace) -> None:
         "difficulty": args.difficulty,
         "min_evidence": args.min_evidence,
         "strict_current": args.strict_current,
+        "task_id": args.task_id,
+        "task_context": task_context,
+        "prior_context": prior_context,
     }
     if not ok:
         output = refusal(args.topic, gate, evidence)
         verification = {"ok": False, "mode": "gate", "issues": gate["issues"]}
         status = "refused"
     else:
-        messages = build_generation_prompt(args.topic, args.question_type, args.count, args.difficulty, evidence, args.language)
+        messages = build_generation_prompt(
+            args.topic,
+            args.question_type,
+            args.count,
+            args.difficulty,
+            evidence,
+            args.language,
+            task_context=task_context,
+            prior_context=prior_context,
+        )
         raw = llama_chat(messages, args.llm_url, args.llm_model, temperature=args.temperature, max_tokens=args.max_tokens)
         try:
             output = extract_json(raw)
@@ -157,6 +196,11 @@ def cmd_generate(args: argparse.Namespace) -> None:
                 if args.llm_verify
                 else verify_static(output, evidence)
             )
+            duplicate_issues = duplicate_points_against_prior(output, prior_context)
+            if duplicate_issues:
+                verification["ok"] = False
+                verification.setdefault("issues", []).extend(duplicate_issues)
+                verification["duplicate_knowledge_points"] = duplicate_issues
             if not verification.get("ok") and args.rewrite_on_fail and output.get("status") != "refused":
                 try:
                     output = rewrite_once(
@@ -170,12 +214,19 @@ def cmd_generate(args: argparse.Namespace) -> None:
                         args.language,
                         args.llm_url,
                         args.llm_model,
+                        task_context=task_context,
+                        prior_context=prior_context,
                     )
                     verification = (
                         verify_with_llm(output, evidence, args.llm_url, args.llm_model)
                         if args.llm_verify
                         else verify_static(output, evidence)
                     )
+                    duplicate_issues = duplicate_points_against_prior(output, prior_context)
+                    if duplicate_issues:
+                        verification["ok"] = False
+                        verification.setdefault("issues", []).extend(duplicate_issues)
+                        verification["duplicate_knowledge_points"] = duplicate_issues
                 except Exception as exc:
                     verification = {"ok": False, "mode": "rewrite", "issues": [f"rewrite failed: {exc}"]}
             status = "ok" if verification.get("ok") and output.get("status") == "ok" else "refused"
@@ -191,13 +242,14 @@ def cmd_generate(args: argparse.Namespace) -> None:
     qid = str(uuid.uuid4())
     conn.execute(
         """
-        INSERT INTO questions(id, topic, question_type, prompt_json, evidence_json, output_json, verification_json, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO questions(id, topic, question_type, task_id, prompt_json, evidence_json, output_json, verification_json, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             qid,
             args.topic,
             args.question_type,
+            args.task_id,
             json.dumps(prompt_record, ensure_ascii=False),
             json.dumps(evidence_to_json(evidence), ensure_ascii=False),
             json.dumps(output, ensure_ascii=False),
@@ -216,6 +268,53 @@ def cmd_generate(args: argparse.Namespace) -> None:
         "output": output,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+def cmd_create_task(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    ensure_db(conn)
+    task = create_or_update_task(
+        conn,
+        task_id=args.task_id,
+        name=args.name,
+        outline=read_json_arg(args.outline, "outline"),
+        source_policy=read_json_arg(args.source_policy, "source-policy"),
+        question_rules=read_json_arg(args.question_rules, "question-rules"),
+        requirements=read_json_arg(args.requirements, "requirements"),
+        coverage=read_json_arg(args.coverage, "coverage"),
+        status=args.status,
+    )
+    print(json.dumps({"ok": True, "task": task}, ensure_ascii=False, indent=2))
+
+def cmd_list_tasks(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    ensure_db(conn)
+    print(json.dumps({"tasks": list_tasks(conn)}, ensure_ascii=False, indent=2))
+
+def cmd_task_status(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    ensure_db(conn)
+    print(json.dumps(task_status(conn, args.task_id), ensure_ascii=False, indent=2))
+
+def cmd_review_question(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    ensure_db(conn)
+    review = record_review(
+        conn,
+        question_id=args.question_id,
+        reviewer=args.reviewer,
+        decision=args.decision,
+        notes=args.notes,
+        patch=read_json_arg(args.patch, "patch") if args.patch else {},
+    )
+    print(json.dumps({"ok": True, "review": review}, ensure_ascii=False, indent=2))
+
+def cmd_audit_duplicates(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    ensure_db(conn)
+    backfilled = backfill_missing_fingerprints(conn) if args.backfill else 0
+    report = audit_duplicate_fingerprints(conn)
+    report["backfilled_fingerprints"] = backfilled
+    print(json.dumps(report, ensure_ascii=False, indent=2))
 
 def cmd_stats(args: argparse.Namespace) -> None:
     conn = connect(args.db)
@@ -244,9 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
             """
             Examples:
               python scripts/senior_exam_writer.py init-db --db ./exam.sqlite
+              python scripts/senior_exam_writer.py create-task --db ./exam.sqlite --name "期末政治理论" --outline ./outline.json --coverage ./coverage.json
               python scripts/senior_exam_writer.py ingest --db ./exam.sqlite --input ./materials --kind book --embed
               python scripts/senior_exam_writer.py retrieve --db ./exam.sqlite --query "共同富裕"
-              python scripts/senior_exam_writer.py generate --db ./exam.sqlite --topic "共同富裕" --count 3 --llm-verify
+              python scripts/senior_exam_writer.py generate --db ./exam.sqlite --task-id TASK_ID --topic "共同富裕" --count 3 --llm-verify
+              python scripts/senior_exam_writer.py review-question --db ./exam.sqlite --question-id QUESTION_ID --decision approved
             """
         ),
     )
@@ -259,7 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("ingest", help="ingest files into the evidence database")
     p.add_argument("--db", required=True)
     p.add_argument("--input", required=True, help="file or directory")
-    p.add_argument("--kind", default="book", choices=["book", "handout", "outline", "current_affairs", "notes"])
+    p.add_argument("--kind", default="book", choices=SOURCE_KINDS)
     p.add_argument("--title")
     p.add_argument("--source-name")
     p.add_argument("--url")
@@ -270,13 +371,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.add_argument("--max-chars", type=int, default=900)
+    p.add_argument("--dedup-threshold", type=float, default=0.9, help="near-duplicate threshold for chunk blocking")
+    p.add_argument("--semantic-dedup-threshold", type=float, default=0.985, help="embedding cosine threshold used for semantic duplicate blocking when --embed is enabled")
+    p.add_argument("--allow-duplicate-chunks", action="store_true", help="store duplicate chunks instead of recording them as blocked duplicates")
     p.set_defaults(func=cmd_ingest, embed=False)
+
+    p = sub.add_parser("create-task", help="create or update an exam-writing task with outline, rules, requirements, and coverage plan")
+    p.add_argument("--db", required=True)
+    p.add_argument("--task-id", help="existing task id to update; omitted means create")
+    p.add_argument("--name", required=True)
+    p.add_argument("--outline", help="JSON string or JSON file path for exam outline/syllabus requirements")
+    p.add_argument("--source-policy", help="JSON string or JSON file path for permitted/required source policy")
+    p.add_argument("--question-rules", help="JSON string or JSON file path for item-writing rules")
+    p.add_argument("--requirements", help="JSON string or JSON file path for other user/exam requirements")
+    p.add_argument("--coverage", help="JSON string or JSON file path for coverage plan and quotas")
+    p.add_argument("--status", default="active", choices=["draft", "active", "paused", "completed"])
+    p.set_defaults(func=cmd_create_task)
+
+    p = sub.add_parser("list-tasks", help="list exam-writing tasks")
+    p.add_argument("--db", required=True)
+    p.set_defaults(func=cmd_list_tasks)
+
+    p = sub.add_parser("task-status", help="show task coverage, source, question, and review status")
+    p.add_argument("--db", required=True)
+    p.add_argument("--task-id", required=True)
+    p.set_defaults(func=cmd_task_status)
 
     p = sub.add_parser("collect-urls", help="download URLs, extract text, and write current-affairs JSONL")
     p.add_argument("--url", action="append", help="source URL; repeatable")
     p.add_argument("--url-file", help="text file with one URL per line")
     p.add_argument("--out-dir", default="./collected_sources", help="directory for raw downloaded files")
     p.add_argument("--output-jsonl", default="./current_affairs_collected.jsonl")
+    p.add_argument("--kind", default="current_affairs", choices=SOURCE_KINDS, help="source kind to use when --ingest is set")
     p.add_argument("--source-name")
     p.add_argument("--title")
     p.add_argument("--published-at")
@@ -292,6 +418,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.add_argument("--max-chars", type=int, default=900)
+    p.add_argument("--dedup-threshold", type=float, default=0.9)
+    p.add_argument("--semantic-dedup-threshold", type=float, default=0.985)
+    p.add_argument("--allow-duplicate-chunks", action="store_true")
     p.set_defaults(func=cmd_collect_urls, embed=False)
 
     p = sub.add_parser("retrieve", help="retrieve evidence for inspection")
@@ -313,6 +442,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top-k", type=int, default=10)
     p.add_argument("--min-evidence", type=int, default=3)
     p.add_argument("--strict-current", action="store_true")
+    p.add_argument("--task-id", help="exam task id whose outline/rules/coverage/prior items should constrain generation")
+    p.add_argument("--prior-limit", type=int, default=50, help="number of prior task question runs to use for duplicate knowledge-point avoidance")
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.add_argument("--llm-url", default=DEFAULT_LLM_URL)
@@ -323,6 +454,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rewrite-on-fail", action="store_true", default=True)
     p.add_argument("--no-rewrite-on-fail", action="store_false", dest="rewrite_on_fail")
     p.set_defaults(func=cmd_generate)
+
+    p = sub.add_parser("review-question", help="record human reviewer approval, revision request, or rejection")
+    p.add_argument("--db", required=True)
+    p.add_argument("--question-id", required=True)
+    p.add_argument("--decision", required=True, choices=["approved", "revise", "rejected"])
+    p.add_argument("--reviewer")
+    p.add_argument("--notes")
+    p.add_argument("--patch", help="JSON string or JSON file path describing reviewer edits")
+    p.set_defaults(func=cmd_review_question)
+
+    p = sub.add_parser("audit-duplicates", help="audit duplicate fingerprints and chunks blocked during ingestion")
+    p.add_argument("--db", required=True)
+    p.add_argument("--backfill", action="store_true", help="create fingerprints for existing chunks before auditing")
+    p.set_defaults(func=cmd_audit_duplicates)
 
     p = sub.add_parser("stats", help="show database counts")
     p.add_argument("--db", required=True)
@@ -350,4 +495,3 @@ def main(argv: list[str] | None = None) -> int:
         if elapsed > 5:
             print(f"[done] {elapsed:.1f}s", file=sys.stderr)
     return 0
-

@@ -128,7 +128,19 @@ def read_json_material(path: Path) -> list[tuple[str, str]]:
         date = item.get("date") or item.get("published_at") or item.get("publish_date")
         source = item.get("source") or item.get("source_name")
         url = item.get("url")
+        question = item.get("question") or item.get("q") or item.get("prompt")
+        answer = item.get("answer") or item.get("a") or item.get("response")
         text = item.get("full_text") or item.get("text") or item.get("content") or item.get("body") or ""
+        if question or answer:
+            text = "\n".join(
+                part
+                for part in [
+                    f"question: {question}" if question else "",
+                    f"answer: {answer}" if answer else "",
+                    str(text) if text else "",
+                ]
+                if part
+            )
         entities = item.get("entities")
         tags = item.get("tags")
         summary = item.get("event_summary") or item.get("summary")
@@ -252,4 +264,3 @@ def chunk_text(text: str, max_chars: int = 900, overlap_chars: int = 120) -> lis
             prev_tail = chunk[-overlap_chars:]
         return merged
     return chunks
-

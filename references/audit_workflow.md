@@ -8,6 +8,11 @@ Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdow
    - `book`: textbook, monograph, official handbook.
    - `handout`: course handout, teacher notes, lecture notes.
    - `outline`: syllabus or knowledge-point outline.
+   - `syllabus`: formal exam/course syllabus with objectives and cognitive verbs.
+   - `exam_rules`: proposition rules, item-writing constraints, scoring rules.
+   - `requirements`: user/exam-specific requirements not already captured by the outline.
+   - `question_bank`: prior/sample questions used for style, distribution, and trap analysis, not copying.
+   - `qa`: knowledge question-answer pairs, FAQ, teacher explanations, or user-provided Q&A.
    - `current_affairs`: dated current-affairs素材, news, policy material, official release.
    - `notes`: user整理稿 or mixed notes.
 
@@ -34,33 +39,52 @@ Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdow
    - Optional llama.cpp embeddings provide semantic retrieval.
    - Retrieval can work without embeddings, but audit quality is higher with a Chinese-capable local embedding model.
 
-6. Retrieve evidence before generation.
+6. Block duplicate knowledge before retrieval.
+   - Each chunk is normalized and fingerprinted.
+   - Exact duplicates and high-similarity near duplicates are not inserted into `chunks` or `chunks_fts`.
+   - When embeddings are enabled, semantic duplicates can also be blocked by cosine similarity.
+   - Duplicate blocking is parent-first: if a parent section is duplicate, its children are skipped rather than counted as separate duplicate rows.
+   - Blocked duplicates are stored in `ingest_duplicates` with the candidate id, original chunk id, similarity, reason, source, locator, and text sample.
+   - Existing databases can be backfilled with fingerprints through `audit-duplicates --backfill`.
+   - Repeated source copies must not be interpreted as stronger independent evidence.
+
+7. Retrieve evidence before generation.
    - Overview and TOC route the topic.
    - Content chunks find precise matches.
    - Parent chunks expand context so the writer does not rely on isolated fragments.
    - Retrieved chunks become evidence IDs such as `E1`, `E2`, `E3`.
    - Course sources are labeled as `core_course_evidence`.
+   - Outline, syllabus, exam rules, and requirements are labeled as `exam_specification`.
+   - Question banks are labeled as `prior_question_style`.
+   - Q&A sources are labeled as `supplemental_qa_evidence`.
    - Current-affairs/current-politics sources are labeled as `background_current_affairs`.
 
-7. Apply evidence gate.
+8. Apply evidence gate.
    - Generation is blocked if there are too few usable content or parent evidence chunks.
    - Generation is blocked if evidence lacks citation locators.
    - Strict current-affairs mode requires dated URL or file-located sources.
    - Current-affairs background cannot replace missing course evidence unless the requested task is explicitly a pure current-affairs item.
 
-8. Generate locally.
-   - The question writer receives only the topic, generation parameters, and retrieved evidence JSON.
+9. Generate locally.
+   - The question writer receives the topic, generation parameters, retrieved evidence JSON, stored task context, and prior task knowledge points.
    - It must output JSON.
    - It is instructed not to use outside facts or invent missing details.
+   - It must include precise `knowledge_points`, `coverage_target`, `style_profile`, `difficulty_rationale`, and `dedup_check`.
+   - It must avoid repeating knowledge points from prior unrejected task outputs and from other items in the same batch.
 
-9. Verify.
+10. Verify.
    - Static verification checks schema, citation IDs, assertions, answer keys, and option consistency.
+   - Static verification checks required knowledge points and duplicate knowledge points within the same batch.
+   - Task-level verification checks repeated knowledge points against prior unrejected generated items.
    - Optional local LLM verification checks whether assertions are supported, contradicted, or absent in the cited evidence.
    - Failed items are rewritten once when enabled; otherwise the run is refused with reasons and strongest evidence snippets.
 
-10. Store audit trail.
+11. Store audit trail.
    - Generation records are stored in SQLite `questions`.
    - Each record stores topic, question type, prompt parameters, evidence JSON, output JSON, verification JSON, status, and timestamp.
+   - Exam-task metadata is stored in `exam_tasks`.
+   - Human review decisions are stored in `question_reviews`.
+   - Blocked duplicate chunks are stored in `ingest_duplicates`.
 
 ## Audit Questions
 
@@ -69,10 +93,17 @@ Use these questions when reviewing a run:
 - Was the source type correctly classified?
 - Did extraction preserve enough heading/page/paragraph location?
 - Are overview and TOC used only for routing unless the item tests document structure?
+- Were duplicate chunks blocked before retrieval?
+- Do repeated source copies avoid inflating evidence confidence?
 - Are final citations drawn from content or parent chunks?
+- Are exam specifications separated from core course evidence?
+- Are question banks used for style only, without copying?
 - Are course claims supported by `core_course_evidence` rather than only background素材?
 - Are current-affairs/current-politics sources dated, sourced, and reviewable?
 - Does every factual claim map to evidence IDs?
+- Does every item declare precise `knowledge_points` and `coverage_target`?
+- Does the item avoid prior covered knowledge points for the same task?
 - Does each wrong option have a documented wrong reason?
 - Did the verifier reject unsupported or contradicted claims?
 - Are current-affairs dates, sources, URLs, and review windows present when needed?
+- Did the human reviewer approve, request revision, or reject the item?

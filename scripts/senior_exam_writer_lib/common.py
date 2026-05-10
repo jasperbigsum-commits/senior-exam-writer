@@ -18,6 +18,19 @@ DEFAULT_LLM_MODEL = os.environ.get("LLAMA_CPP_LLM_MODEL", "local-instruct")
 
 DEFAULT_USER_AGENT = "senior-exam-writer/1.0 (+local evidence collection)"
 
+SOURCE_KINDS = [
+    "book",
+    "handout",
+    "outline",
+    "syllabus",
+    "exam_rules",
+    "question_bank",
+    "qa",
+    "requirements",
+    "current_affairs",
+    "notes",
+]
+
 @dataclass
 class Section:
     title: str

@@ -11,6 +11,8 @@ Every item should be:
 - exam-grade: clear stem, explicit task, no accidental ambiguity;
 - fair: enough information is present to answer from the supplied course/current-affairs evidence;
 - reviewable: the output records citations, cognitive level, difficulty, and rationale.
+- coverage-aware: the output records the exact outline or coverage-plan target.
+- non-duplicative: the output records precise knowledge points and avoids repeating prior task coverage.
 
 Avoid:
 
@@ -68,6 +70,8 @@ When an outline or syllabus is ingested:
 - Prefer questions matching the strongest available learning-objective verb.
 - Do not create high-difficulty analysis questions from a topic marked only as basic recall unless the user explicitly requests it and evidence supports it.
 - Record the alignment in `style_profile.syllabus_alignment`.
+- Record the concrete coverage node in `coverage_target`.
+- When a coverage plan exists, prefer uncovered nodes and refuse or ask for clarification when only already-covered points have evidence.
 
 Suggested mapping:
 
@@ -87,8 +91,14 @@ Each item should include:
     "syllabus_alignment": "Chapter 3 / section path / learning objective",
     "stem_style": "material-based application"
   },
+  "knowledge_points": ["policy concept applied to a dated case"],
+  "coverage_target": "Chapter 3 / section 2 / apply concept to current case",
   "difficulty": "medium",
-  "difficulty_rationale": "The item asks learners to apply a chapter concept to a dated policy case; it uses one course evidence chunk and one background evidence chunk."
+  "difficulty_rationale": "The item asks learners to apply a chapter concept to a dated policy case; it uses one course evidence chunk and one background evidence chunk.",
+  "dedup_check": {
+    "against_prior_task_items": "No previous approved or unrejected item tested this exact application point.",
+    "within_batch": "Sibling items test different coverage targets."
+  }
 }
 ```
 
@@ -99,6 +109,8 @@ The `difficulty_rationale` should mention the evidence basis, cognitive level, a
 - Does the item test the requested topic rather than a nearby but different topic?
 - Does the difficulty match the outline verb or chapter emphasis?
 - Is the cognitive level explicit and plausible?
+- Does the item map to a declared coverage target?
+- Does the item repeat a knowledge point already covered in the same task?
 - Are distractors plausible but not ambiguous?
 - Is the answer derivable from cited evidence alone?
 - Does the rationale justify the difficulty label?

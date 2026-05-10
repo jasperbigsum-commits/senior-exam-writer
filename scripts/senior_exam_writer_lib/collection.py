@@ -6,6 +6,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -169,4 +170,3 @@ def collect_urls(
         for record in records:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     return {"count": len(records), "jsonl": str(jsonl_path.resolve()), "records": records}
-

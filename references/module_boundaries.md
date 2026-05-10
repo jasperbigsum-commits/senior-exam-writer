@@ -26,6 +26,11 @@ Use this reference when auditing whether `循证出题官` follows the single-re
 - Owns heading detection, section extraction, and chunking.
 - Does not write SQLite rows or call embedding/generation models.
 
+`scripts/senior_exam_writer_lib/dedup.py`
+
+- Owns text normalization, chunk fingerprints, exact/near-duplicate detection, duplicate audit reports, and knowledge-point normalization.
+- Does not parse documents, retrieve evidence, or generate questions.
+
 `scripts/senior_exam_writer_lib/collection.py`
 
 - Owns URL download, HTML metadata extraction, raw source saving, and JSONL normalization.
@@ -50,6 +55,11 @@ Use this reference when auditing whether `循证出题官` follows the single-re
 - Does not retrieve new evidence during generation.
 - Does not download sources.
 
+`scripts/senior_exam_writer_lib/tasks.py`
+
+- Owns exam-task records, task JSON loading, reviewer decisions, task status reports, prior generated-item context, and prior knowledge-point duplicate checks.
+- Does not parse documents, insert evidence chunks, or call models.
+
 `scripts/senior_exam_writer_lib/cli.py`
 
 - Owns argparse commands and high-level orchestration.
@@ -62,12 +72,15 @@ The pipeline has explicit handoffs:
 
 1. Collection produces JSONL and raw files.
 2. Parsing produces sections and chunks.
-3. Ingestion stores sources/chunks and embeddings.
-4. Retrieval produces evidence objects.
-5. Evidence gate approves or refuses generation.
-6. Generation writes draft JSON from supplied evidence only.
-7. Verification accepts, rewrites, or refuses.
-8. CLI stores the final audit trail.
+3. De-duplication blocks repeated chunks and records duplicate audit rows.
+4. Ingestion stores unique sources/chunks and embeddings.
+5. Retrieval produces evidence objects.
+6. Task context supplies outline, source policy, proposition rules, requirements, coverage, and prior knowledge points.
+7. Evidence gate approves or refuses generation.
+8. Generation writes draft JSON from supplied evidence and task context only.
+9. Verification accepts, rewrites, or refuses.
+10. Reviewer decisions are recorded without overwriting the original generation record.
+11. CLI stores the final audit trail.
 
 No module after retrieval may invent or fetch additional facts. No module before verification may declare an item valid.
 
@@ -78,9 +91,10 @@ The Skill is audit-ready when:
 - every source has a path or URL;
 - current-affairs sources have date/source metadata or are refused in strict mode;
 - each evidence chunk has source kind, role, locator, and citation;
-- each item contains assertions, citations, evidence roles, style profile, difficulty rationale, and verification status;
+- duplicate chunks are blocked or explicitly allowed by operator choice and recorded when blocked;
+- each item contains assertions, citations, evidence roles, knowledge points, coverage target, style profile, difficulty rationale, de-duplication check, and verification status;
 - refused generations include missing evidence and strongest retrieved snippets;
-- SQLite `questions` stores prompt parameters, evidence JSON, output JSON, verification JSON, status, and timestamp.
+- SQLite `exam_tasks`, `questions`, `question_reviews`, `chunk_fingerprints`, and `ingest_duplicates` preserve task, generation, review, and duplicate-control audit trails.
 
 ## Known Boundaries And Non-Goals
 
@@ -88,6 +102,7 @@ The Skill is audit-ready when:
 - The tool does not guarantee PDF OCR; scanned PDFs need an OCR preprocessing step outside this Skill.
 - The tool does not determine political truth from model memory.
 - The tool does not make live web facts usable until they are collected, normalized, and ingested.
+- The tool does not treat duplicated chunks as independent corroborating evidence.
 - The tool does not replace human review for high-stakes exams.
 - The tool does not guarantee that every generated distractor is pedagogically ideal; it enforces evidence support and records rationale for review.
 

@@ -201,6 +201,16 @@ def retrieve_evidence(
 def evidence_to_json(evidence: list[Evidence], max_chars: int = 1200) -> list[dict[str, Any]]:
     data = []
     for ev in evidence:
+        if ev.source_kind == "current_affairs":
+            role = "background_current_affairs"
+        elif ev.source_kind in {"outline", "syllabus", "exam_rules", "requirements"}:
+            role = "exam_specification"
+        elif ev.source_kind == "question_bank":
+            role = "prior_question_style"
+        elif ev.source_kind == "qa":
+            role = "supplemental_qa_evidence"
+        else:
+            role = "core_course_evidence"
         data.append(
             {
                 "id": ev.id,
@@ -208,7 +218,7 @@ def evidence_to_json(evidence: list[Evidence], max_chars: int = 1200) -> list[di
                 "layer": ev.layer,
                 "score": ev.score,
                 "source_kind": ev.source_kind,
-                "role": "background_current_affairs" if ev.source_kind == "current_affairs" else "core_course_evidence",
+                "role": role,
                 "citation": ev.citation(),
                 "path": ev.path,
                 "locator": ev.locator,
@@ -233,4 +243,3 @@ def gate_evidence(evidence: list[Evidence], min_evidence: int, strict_current: b
         if len(dated) < min_evidence:
             issues.append("strict current-affairs mode requires dated URL/file-located sources")
     return not issues, {"ok": not issues, "issues": issues, "usable_evidence": len(with_locators)}
-

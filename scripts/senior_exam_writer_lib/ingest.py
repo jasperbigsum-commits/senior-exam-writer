@@ -6,6 +6,15 @@ from pathlib import Path
 from typing import Any
 
 from .common import SUPPORTED_SUFFIXES, now_iso, stable_id
+from .dedup import (
+    DEFAULT_DEDUP_THRESHOLD,
+    DEFAULT_SEMANTIC_DEDUP_THRESHOLD,
+    backfill_missing_fingerprints,
+    find_duplicate_chunk,
+    record_chunk_fingerprint,
+    record_duplicate_chunk,
+    summarize_duplicates,
+)
 from .llama_cpp_client import llama_embed
 from .parsing import approx_tokens, chunk_text, load_document, sections_from_parts
 
@@ -59,6 +68,61 @@ def insert_chunk(
         (chunk_id, title, path, text),
     )
 
+def insert_unique_chunk(
+    conn: sqlite3.Connection,
+    *,
+    chunk_id: str,
+    source_id: str,
+    parent_id: str | None,
+    layer: str,
+    path: str,
+    title: str,
+    locator: str,
+    text: str,
+    metadata: dict[str, Any] | None = None,
+    embedding: list[float] | None = None,
+    dedup: bool = True,
+    dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD,
+    semantic_dedup_threshold: float = DEFAULT_SEMANTIC_DEDUP_THRESHOLD,
+) -> tuple[bool, str | None]:
+    if dedup:
+        duplicate = find_duplicate_chunk(
+            conn,
+            text=text,
+            layer=layer,
+            threshold=dedup_threshold,
+            embedding=embedding,
+            semantic_threshold=semantic_dedup_threshold,
+        )
+        if duplicate:
+            record_duplicate_chunk(
+                conn,
+                source_id=source_id,
+                candidate_id=chunk_id,
+                duplicate=duplicate,
+                layer=layer,
+                path=path,
+                title=title,
+                locator=locator,
+                text=text,
+            )
+            return False, duplicate.duplicate_of_chunk_id
+    insert_chunk(
+        conn,
+        chunk_id=chunk_id,
+        source_id=source_id,
+        parent_id=parent_id,
+        layer=layer,
+        path=path,
+        title=title,
+        locator=locator,
+        text=text,
+        metadata=metadata,
+        embedding=embedding,
+    )
+    record_chunk_fingerprint(conn, chunk_id=chunk_id, source_id=source_id, layer=layer, text=text)
+    return True, None
+
 def batch_embed(texts: list[str], embed: bool, embed_url: str, embed_model: str, batch_size: int = 8) -> list[list[float] | None]:
     if not embed:
         return [None] * len(texts)
@@ -67,6 +131,15 @@ def batch_embed(texts: list[str], embed: bool, embed_url: str, embed_model: str,
         batch = texts[start : start + batch_size]
         vectors.extend(llama_embed(batch, embed_url, embed_model))
     return vectors
+
+def delete_source_tree(conn: sqlite3.Connection, source_id: str) -> None:
+    chunk_ids = [
+        row["id"]
+        for row in conn.execute("SELECT id FROM chunks WHERE source_id = ?", (source_id,)).fetchall()
+    ]
+    for chunk_id in chunk_ids:
+        conn.execute("DELETE FROM chunks_fts WHERE chunk_id = ?", (chunk_id,))
+    conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
 
 def ingest_file(
     conn: sqlite3.Connection,
@@ -82,13 +155,18 @@ def ingest_file(
     embed_url: str,
     embed_model: str,
     max_chars: int,
+    dedup: bool = True,
+    dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD,
+    semantic_dedup_threshold: float = DEFAULT_SEMANTIC_DEDUP_THRESHOLD,
 ) -> dict[str, Any]:
     doc_title = title or path.stem
     parts = load_document(path)
     sections, toc_titles = sections_from_parts(parts, doc_title)
     source_id = stable_id(str(path.resolve()), doc_title, kind, version or "")
+    if dedup:
+        backfill_missing_fingerprints(conn)
 
-    conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+    delete_source_tree(conn, source_id)
     conn.execute(
         """
         INSERT INTO sources(id, kind, title, path, source_name, url, published_at, version, metadata_json, created_at)
@@ -113,7 +191,7 @@ def ingest_file(
     toc_text = "\n".join(toc_titles[:500]) or "\n".join(section.path for section in sections[:200])
     toc_id = stable_id(source_id, "toc")
     overview_vec, toc_vec = batch_embed([overview_text, toc_text], embed, embed_url, embed_model)
-    insert_chunk(
+    overview_inserted, _ = insert_unique_chunk(
         conn,
         chunk_id=overview_id,
         source_id=source_id,
@@ -124,8 +202,11 @@ def ingest_file(
         locator="overview",
         text=overview_text or doc_title,
         embedding=overview_vec,
+        dedup=dedup,
+        dedup_threshold=dedup_threshold,
+        semantic_dedup_threshold=semantic_dedup_threshold,
     )
-    insert_chunk(
+    toc_inserted, _ = insert_unique_chunk(
         conn,
         chunk_id=toc_id,
         source_id=source_id,
@@ -136,6 +217,9 @@ def ingest_file(
         locator="toc",
         text=toc_text or doc_title,
         embedding=toc_vec,
+        dedup=dedup,
+        dedup_threshold=dedup_threshold,
+        semantic_dedup_threshold=semantic_dedup_threshold,
     )
 
     parent_count = 0
@@ -143,7 +227,7 @@ def ingest_file(
     for sidx, section in enumerate(sections, 1):
         parent_id = stable_id(source_id, "parent", str(sidx), section.path, section.text[:200])
         parent_vec = batch_embed([f"{section.path}\n{section.text[:1800]}"], embed, embed_url, embed_model)[0]
-        insert_chunk(
+        parent_inserted, _duplicate_parent = insert_unique_chunk(
             conn,
             chunk_id=parent_id,
             source_id=source_id,
@@ -155,14 +239,19 @@ def ingest_file(
             text=section.text,
             metadata={"level": section.level},
             embedding=parent_vec,
+            dedup=dedup,
+            dedup_threshold=dedup_threshold,
+            semantic_dedup_threshold=semantic_dedup_threshold,
         )
+        if not parent_inserted:
+            continue
         parent_count += 1
 
         child_texts = chunk_text(section.text, max_chars=max_chars)
         child_vectors = batch_embed([f"{section.path}\n{txt}" for txt in child_texts], embed, embed_url, embed_model)
         for cidx, (child, child_vec) in enumerate(zip(child_texts, child_vectors), 1):
             child_id = stable_id(source_id, "content", str(sidx), str(cidx), section.path, child[:200])
-            insert_chunk(
+            child_inserted, _duplicate_child = insert_unique_chunk(
                 conn,
                 chunk_id=child_id,
                 source_id=source_id,
@@ -174,8 +263,19 @@ def ingest_file(
                 text=child,
                 metadata={"level": section.level, "chunk_index": cidx},
                 embedding=child_vec,
+                dedup=dedup,
+                dedup_threshold=dedup_threshold,
+                semantic_dedup_threshold=semantic_dedup_threshold,
             )
-            child_count += 1
+            if child_inserted:
+                child_count += 1
     conn.commit()
-    return {"source_id": source_id, "title": doc_title, "parents": parent_count, "children": child_count}
-
+    return {
+        "source_id": source_id,
+        "title": doc_title,
+        "overview": int(overview_inserted),
+        "toc": int(toc_inserted),
+        "parents": parent_count,
+        "children": child_count,
+        "dedup": summarize_duplicates(conn, source_id),
+    }
