@@ -14,10 +14,29 @@ from .evidence_roles import (
     item_role_for_source_kind,
     is_answer_evidence_kind,
 )
+from .runtime import ensure_local_base_url
 from .source_metadata import current_affairs_metadata_issues
 
 QUESTION_TYPES = {"single_choice", "multiple_choice", "material_analysis", "short_answer"}
 DIFFICULTIES = {"easy", "medium", "hard"}
+CANDIDATE_REVIEW_DECISIONS = {
+    "approved_candidate",
+    "revise_candidate",
+    "replan_required",
+    "evidence_gap",
+    "rejected_candidate",
+}
+CANDIDATE_REASON_CODES = {
+    "writer_quality_issue",
+    "duplicate_risk_high",
+    "outline_misalignment",
+    "coverage_misalignment",
+    "evidence_weak",
+    "evidence_missing",
+    "needs_replanning",
+    "accepted",
+}
+BLOCKING_SIMILARITY_RESULTS = {"blocked_duplicate", "revise_required"}
 
 
 class ValidationError(ValueError):
@@ -29,6 +48,13 @@ class ValidationError(ValueError):
 def require_no_issues(issues: list[str]) -> None:
     if issues:
         raise ValidationError(issues)
+
+
+def validate_local_endpoint(url: str, label: str) -> None:
+    try:
+        ensure_local_base_url(url)
+    except ValueError as exc:
+        raise ValidationError([f"{label} must use a local loopback URL: {url}"]) from exc
 
 
 def as_dict(value: Any, label: str, issues: list[str]) -> dict[str, Any]:
@@ -493,6 +519,20 @@ def validate_review_request(
         issues.append(f"question not found: {question_id}")
         require_no_issues(issues)
     if decision == "approved":
+        audit = conn.execute(
+            """
+            SELECT audit_result
+            FROM question_similarity_audits
+            WHERE question_id = ?
+            ORDER BY created_at DESC, compared_at DESC
+            LIMIT 1
+            """,
+            (question_id,),
+        ).fetchone()
+        if not audit:
+            issues.append("cannot approve without a fresh similarity audit")
+        elif audit["audit_result"] in BLOCKING_SIMILARITY_RESULTS:
+            issues.append(f"cannot approve when similarity audit result is {audit['audit_result']}")
         if row["status"] != "ok":
             issues.append("cannot approve a question run whose status is not ok")
         try:
@@ -507,6 +547,42 @@ def validate_review_request(
                 issues.append("cannot approve output without passing verification")
     if decision in {"revise", "rejected"} and not str(notes or "").strip():
         issues.append("review notes are required for revise or rejected decisions")
+    require_no_issues(issues)
+
+
+def validate_candidate_review_decision(decision: str, reason_code: str, notes: str) -> None:
+    issues: list[str] = []
+    if decision not in CANDIDATE_REVIEW_DECISIONS:
+        issues.append(f"unsupported candidate review decision: {decision}")
+    if reason_code not in CANDIDATE_REASON_CODES:
+        issues.append(f"unsupported candidate review reason_code: {reason_code}")
+    if not str(notes or "").strip():
+        issues.append("candidate review notes are required")
+    require_no_issues(issues)
+
+
+def validate_candidate_approval_gate(conn: sqlite3.Connection, candidate_id: str, decision: str) -> None:
+    issues: list[str] = []
+    candidate = conn.execute("SELECT id, status FROM candidate_questions WHERE id = ?", (candidate_id,)).fetchone()
+    if not candidate:
+        issues.append(f"candidate question not found: {candidate_id}")
+        require_no_issues(issues)
+    if decision != "approved_candidate":
+        return
+    audit = conn.execute(
+        """
+        SELECT audit_result
+        FROM question_similarity_audits
+        WHERE candidate_question_id = ?
+        ORDER BY created_at DESC, compared_at DESC
+        LIMIT 1
+        """,
+        (candidate_id,),
+    ).fetchone()
+    if not audit:
+        issues.append("candidate approval requires a fresh similarity audit")
+    elif audit["audit_result"] in BLOCKING_SIMILARITY_RESULTS:
+        issues.append(f"candidate approval blocked by similarity result {audit['audit_result']}")
     require_no_issues(issues)
 
 

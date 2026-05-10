@@ -2,6 +2,14 @@ from __future__ import annotations
 
 import sqlite3
 
+
+QUESTION_TASK_ID_FK_NOTE = (
+    "Legacy databases upgraded in place receive questions.task_id via ALTER TABLE, "
+    "so SQLite cannot retroactively attach the REFERENCES exam_tasks(id) ON DELETE SET NULL "
+    "constraint without rebuilding the table. Fresh databases get the foreign key; upgraded "
+    "databases intentionally keep a nullable plain TEXT column for compatibility."
+)
+
 def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -111,21 +119,390 @@ def init_db(conn: sqlite3.Connection) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS fetch_cache (
+          cache_key TEXT PRIMARY KEY,
+          url TEXT NOT NULL,
+          response_status INTEGER,
+          response_headers_json TEXT NOT NULL DEFAULT '{}',
+          response_body_path TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          fetched_at TEXT NOT NULL,
+          expires_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS planning_units (
+          id TEXT PRIMARY KEY,
+          task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE,
+          unit_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          objective TEXT,
+          coverage_target TEXT,
+          question_type TEXT,
+          difficulty TEXT,
+          knowledge_points_json TEXT NOT NULL DEFAULT '[]',
+          knowledge_status TEXT NOT NULL DEFAULT 'planned',
+          evidence_status TEXT NOT NULL DEFAULT 'pending',
+          writer_round INTEGER NOT NULL DEFAULT 0,
+          review_status TEXT NOT NULL DEFAULT 'pending',
+          constraints_json TEXT NOT NULL DEFAULT '{}',
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS evidence_points (
+          id TEXT PRIMARY KEY,
+          planning_unit_id TEXT REFERENCES planning_units(id) ON DELETE CASCADE,
+          evidence_id TEXT,
+          source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
+          chunk_id TEXT REFERENCES chunks(id) ON DELETE SET NULL,
+          support_status TEXT NOT NULL DEFAULT 'missing',
+          role TEXT NOT NULL,
+          claim_text TEXT NOT NULL,
+          citation_text TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS candidate_questions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE,
+          planning_unit_id TEXT REFERENCES planning_units(id) ON DELETE SET NULL,
+          question_type TEXT NOT NULL,
+          prompt_text TEXT NOT NULL,
+          draft_json TEXT NOT NULL DEFAULT '{}',
+          writer_id TEXT NOT NULL DEFAULT '',
+          round INTEGER NOT NULL DEFAULT 0,
+          prompt_json TEXT NOT NULL DEFAULT '{}',
+          output_json TEXT NOT NULL DEFAULT '{}',
+          verification_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS candidate_reviews (
+          id TEXT PRIMARY KEY,
+          candidate_question_id TEXT NOT NULL REFERENCES candidate_questions(id) ON DELETE CASCADE,
+          reviewer TEXT,
+          decision TEXT NOT NULL,
+          reason_code TEXT NOT NULL DEFAULT '',
+          notes TEXT,
+          review_json TEXT NOT NULL DEFAULT '{}',
+          patch_json TEXT NOT NULL DEFAULT '{}',
+          reviewed_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS question_similarity_audits (
+          id TEXT PRIMARY KEY,
+          candidate_question_id TEXT REFERENCES candidate_questions(id) ON DELETE CASCADE,
+          question_id TEXT REFERENCES questions(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE,
+          embed_model TEXT NOT NULL DEFAULT '',
+          embed_url TEXT NOT NULL DEFAULT '',
+          threshold_policy_json TEXT NOT NULL DEFAULT '{}',
+          audit_result TEXT NOT NULL DEFAULT '',
+          audit_summary_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT '',
+          compared_at TEXT NOT NULL,
+          threshold REAL,
+          summary_json TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS question_similarity_hits (
+          id TEXT PRIMARY KEY,
+          audit_id TEXT NOT NULL REFERENCES question_similarity_audits(id) ON DELETE CASCADE,
+          matched_source_kind TEXT NOT NULL DEFAULT '',
+          matched_source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
+          matched_chunk_id TEXT REFERENCES chunks(id) ON DELETE SET NULL,
+          matched_question_id TEXT,
+          similarity_score REAL,
+          match_reason TEXT NOT NULL DEFAULT '',
+          snippet TEXT,
+          similarity REAL NOT NULL,
+          match_kind TEXT NOT NULL,
+          excerpt_text TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
         CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks(parent_id);
         CREATE INDEX IF NOT EXISTS idx_chunks_layer ON chunks(layer);
         CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);
-        CREATE INDEX IF NOT EXISTS idx_questions_task ON questions(task_id);
         CREATE INDEX IF NOT EXISTS idx_reviews_question ON question_reviews(question_id);
         CREATE INDEX IF NOT EXISTS idx_fingerprints_hash ON chunk_fingerprints(text_hash);
         CREATE INDEX IF NOT EXISTS idx_fingerprints_layer ON chunk_fingerprints(layer);
         CREATE INDEX IF NOT EXISTS idx_duplicates_source ON ingest_duplicates(source_id);
+        CREATE INDEX IF NOT EXISTS idx_planning_units_task ON planning_units(task_id);
+        CREATE INDEX IF NOT EXISTS idx_evidence_points_unit ON evidence_points(planning_unit_id);
+        CREATE INDEX IF NOT EXISTS idx_candidate_questions_task ON candidate_questions(task_id);
+        CREATE INDEX IF NOT EXISTS idx_candidate_questions_unit ON candidate_questions(planning_unit_id);
+        CREATE INDEX IF NOT EXISTS idx_candidate_reviews_question ON candidate_reviews(candidate_question_id);
+        CREATE INDEX IF NOT EXISTS idx_similarity_audits_question ON question_similarity_audits(candidate_question_id);
+        CREATE INDEX IF NOT EXISTS idx_similarity_hits_audit ON question_similarity_hits(audit_id);
         """
     )
-    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(questions)").fetchall()}
-    if "task_id" not in existing_columns:
-        conn.execute("ALTER TABLE questions ADD COLUMN task_id TEXT")
+    _ensure_questions_task_id_column(conn)
+    _ensure_planning_units_columns(conn)
+    _ensure_evidence_points_columns(conn)
+    _ensure_candidate_questions_columns(conn)
+    _ensure_candidate_reviews_columns(conn)
+    _ensure_similarity_review_columns(conn)
     conn.commit()
+
+
+def _column_name(row: sqlite3.Row | tuple[object, ...]) -> str:
+    return row["name"] if isinstance(row, sqlite3.Row) else row[1]
+
+
+def _ensure_questions_task_id_column(conn: sqlite3.Connection) -> None:
+    existing_columns = {_column_name(row) for row in conn.execute("PRAGMA table_info(questions)").fetchall()}
+    if "task_id" in existing_columns:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_questions_task ON questions(task_id)")
+        return
+    # SQLite cannot add a foreign key constraint with ALTER TABLE ADD COLUMN.
+    # We keep the upgrade path explicit so callers understand why fresh and upgraded
+    # databases differ here; later tasks can rebuild the table if strict parity is needed.
+    conn.execute("ALTER TABLE questions ADD COLUMN task_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_questions_task ON questions(task_id)")
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    existing_columns = {_column_name(row) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    if column_name in existing_columns:
+        return
+    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+
+def _ensure_planning_units_columns(conn: sqlite3.Connection) -> None:
+    _ensure_column(conn, "planning_units", "coverage_target", "coverage_target TEXT")
+    _ensure_column(conn, "planning_units", "question_type", "question_type TEXT")
+    _ensure_column(conn, "planning_units", "difficulty", "difficulty TEXT")
+    _ensure_column(
+        conn,
+        "planning_units",
+        "knowledge_points_json",
+        "knowledge_points_json TEXT NOT NULL DEFAULT '[]'",
+    )
+    _ensure_column(
+        conn,
+        "planning_units",
+        "knowledge_status",
+        "knowledge_status TEXT NOT NULL DEFAULT 'planned'",
+    )
+    _ensure_column(
+        conn,
+        "planning_units",
+        "evidence_status",
+        "evidence_status TEXT NOT NULL DEFAULT 'pending'",
+    )
+    _ensure_column(
+        conn,
+        "planning_units",
+        "writer_round",
+        "writer_round INTEGER NOT NULL DEFAULT 0",
+    )
+    _ensure_column(
+        conn,
+        "planning_units",
+        "review_status",
+        "review_status TEXT NOT NULL DEFAULT 'pending'",
+    )
+
+
+def _ensure_evidence_points_columns(conn: sqlite3.Connection) -> None:
+    _ensure_column(conn, "evidence_points", "evidence_id", "evidence_id TEXT")
+    _ensure_column(
+        conn,
+        "evidence_points",
+        "support_status",
+        "support_status TEXT NOT NULL DEFAULT 'missing'",
+    )
+
+
+def _ensure_candidate_questions_columns(conn: sqlite3.Connection) -> None:
+    _ensure_column(conn, "candidate_questions", "writer_id", "writer_id TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "candidate_questions", "round", "round INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "candidate_questions", "prompt_json", "prompt_json TEXT NOT NULL DEFAULT '{}'")
+    _ensure_column(conn, "candidate_questions", "output_json", "output_json TEXT NOT NULL DEFAULT '{}'")
+    _ensure_column(conn, "candidate_questions", "verification_json", "verification_json TEXT NOT NULL DEFAULT '{}'")
+
+
+def _ensure_candidate_reviews_columns(conn: sqlite3.Connection) -> None:
+    _rebuild_candidate_reviews_if_legacy_check(conn)
+    _ensure_column(conn, "candidate_reviews", "reason_code", "reason_code TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "candidate_reviews", "review_json", "review_json TEXT NOT NULL DEFAULT '{}'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_candidate_reviews_question ON candidate_reviews(candidate_question_id)")
+
+
+def _ensure_similarity_review_columns(conn: sqlite3.Connection) -> None:
+    _rebuild_similarity_audits_if_candidate_required(conn)
+    _ensure_column(
+        conn,
+        "question_similarity_audits",
+        "question_id",
+        "question_id TEXT REFERENCES questions(id) ON DELETE CASCADE",
+    )
+    _ensure_column(
+        conn,
+        "question_similarity_audits",
+        "task_id",
+        "task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE",
+    )
+    _ensure_column(
+        conn,
+        "question_similarity_audits",
+        "embed_model",
+        "embed_model TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(conn, "question_similarity_audits", "embed_url", "embed_url TEXT NOT NULL DEFAULT ''")
+    _ensure_column(
+        conn,
+        "question_similarity_audits",
+        "threshold_policy_json",
+        "threshold_policy_json TEXT NOT NULL DEFAULT '{}'",
+    )
+    _ensure_column(
+        conn,
+        "question_similarity_audits",
+        "audit_result",
+        "audit_result TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        conn,
+        "question_similarity_audits",
+        "audit_summary_json",
+        "audit_summary_json TEXT NOT NULL DEFAULT '{}'",
+    )
+    _ensure_column(conn, "question_similarity_audits", "created_at", "created_at TEXT NOT NULL DEFAULT ''")
+    _ensure_column(
+        conn,
+        "question_similarity_hits",
+        "matched_source_kind",
+        "matched_source_kind TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(conn, "question_similarity_hits", "matched_question_id", "matched_question_id TEXT")
+    _ensure_column(conn, "question_similarity_hits", "similarity_score", "similarity_score REAL")
+    _ensure_column(conn, "question_similarity_hits", "match_reason", "match_reason TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "question_similarity_hits", "snippet", "snippet TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_audits_question ON question_similarity_audits(candidate_question_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_hits_audit ON question_similarity_hits(audit_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_audits_task ON question_similarity_audits(task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_audits_result ON question_similarity_audits(audit_result)")
+
+
+def _table_sql(conn: sqlite3.Connection, table_name: str) -> str:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return str(row["sql"] if isinstance(row, sqlite3.Row) else row[0]) if row else ""
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    return {_column_name(row) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _rebuild_candidate_reviews_if_legacy_check(conn: sqlite3.Connection) -> None:
+    table_sql = _table_sql(conn, "candidate_reviews")
+    if "CHECK(decision IN ('approved', 'revise', 'rejected'))" not in table_sql:
+        return
+    existing_columns = _table_columns(conn, "candidate_reviews")
+    reason_expr = "reason_code" if "reason_code" in existing_columns else "''"
+    review_expr = "review_json" if "review_json" in existing_columns else "'{}'"
+    conn.executescript(
+        """
+        ALTER TABLE candidate_reviews RENAME TO candidate_reviews_legacy;
+        CREATE TABLE candidate_reviews (
+          id TEXT PRIMARY KEY,
+          candidate_question_id TEXT NOT NULL REFERENCES candidate_questions(id) ON DELETE CASCADE,
+          reviewer TEXT,
+          decision TEXT NOT NULL,
+          reason_code TEXT NOT NULL DEFAULT '',
+          notes TEXT,
+          review_json TEXT NOT NULL DEFAULT '{}',
+          patch_json TEXT NOT NULL DEFAULT '{}',
+          reviewed_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO candidate_reviews
+        (id, candidate_question_id, reviewer, decision, reason_code, notes, review_json, patch_json, reviewed_at)
+        SELECT id, candidate_question_id, reviewer, decision, {reason_expr}, notes, {review_expr}, patch_json, reviewed_at
+        FROM candidate_reviews_legacy
+        """
+    )
+    conn.execute("DROP TABLE candidate_reviews_legacy")
+
+
+def _rebuild_similarity_audits_if_candidate_required(conn: sqlite3.Connection) -> None:
+    notnull_by_column = {
+        _column_name(row): int(row["notnull"] if isinstance(row, sqlite3.Row) else row[3])
+        for row in conn.execute("PRAGMA table_info(question_similarity_audits)").fetchall()
+    }
+    if notnull_by_column.get("candidate_question_id") != 1:
+        return
+    existing_columns = _table_columns(conn, "question_similarity_audits")
+    exprs = {
+        "question_id": "question_id" if "question_id" in existing_columns else "NULL",
+        "task_id": "task_id" if "task_id" in existing_columns else "NULL",
+        "embed_model": "embed_model" if "embed_model" in existing_columns else "''",
+        "embed_url": "embed_url" if "embed_url" in existing_columns else "''",
+        "threshold_policy_json": "threshold_policy_json" if "threshold_policy_json" in existing_columns else "'{}'",
+        "audit_result": "audit_result" if "audit_result" in existing_columns else "''",
+        "audit_summary_json": "audit_summary_json" if "audit_summary_json" in existing_columns else "'{}'",
+        "created_at": "created_at" if "created_at" in existing_columns else "compared_at",
+        "compared_at": "compared_at" if "compared_at" in existing_columns else "created_at",
+        "threshold": "threshold" if "threshold" in existing_columns else "NULL",
+        "summary_json": "summary_json" if "summary_json" in existing_columns else "'{}'",
+    }
+    conn.executescript(
+        """
+        ALTER TABLE question_similarity_audits RENAME TO question_similarity_audits_legacy;
+        CREATE TABLE question_similarity_audits (
+          id TEXT PRIMARY KEY,
+          candidate_question_id TEXT REFERENCES candidate_questions(id) ON DELETE CASCADE,
+          question_id TEXT REFERENCES questions(id) ON DELETE CASCADE,
+          task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE,
+          embed_model TEXT NOT NULL DEFAULT '',
+          embed_url TEXT NOT NULL DEFAULT '',
+          threshold_policy_json TEXT NOT NULL DEFAULT '{}',
+          audit_result TEXT NOT NULL DEFAULT '',
+          audit_summary_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT '',
+          compared_at TEXT NOT NULL,
+          threshold REAL,
+          summary_json TEXT NOT NULL DEFAULT '{}'
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO question_similarity_audits
+        (
+          id, candidate_question_id, question_id, task_id, embed_model, embed_url,
+          threshold_policy_json, audit_result, audit_summary_json,
+          created_at, compared_at, threshold, summary_json
+        )
+        SELECT
+          id, candidate_question_id, {exprs["question_id"]}, {exprs["task_id"]},
+          {exprs["embed_model"]}, {exprs["embed_url"]}, {exprs["threshold_policy_json"]},
+          {exprs["audit_result"]}, {exprs["audit_summary_json"]}, {exprs["created_at"]},
+          {exprs["compared_at"]}, {exprs["threshold"]}, {exprs["summary_json"]}
+        FROM question_similarity_audits_legacy
+        """
+    )
+    conn.execute("DROP TABLE question_similarity_audits_legacy")
+
 
 def ensure_db(conn: sqlite3.Connection) -> None:
     init_db(conn)

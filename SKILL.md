@@ -26,13 +26,32 @@ Core policy is script-enforced. Do not rely on prompt compliance alone: task cre
 
 ## Standard Workflow
 
-1. Create a SQLite evidence database:
+1. Create or migrate a SQLite evidence database:
 
 ```bash
 python scripts/senior_exam_writer.py init-db --db ./exam_evidence.sqlite
 ```
 
-2. Create an auditable exam task from the actual outline, question-bank policy, proposition rules, extra requirements, and coverage plan. These values may be JSON strings or JSON files.
+2. Initialize the local runtime. Both embedding and generation endpoints must be loopback URLs; use the generated sidecar folders for downloads, cache files, and reports.
+
+```bash
+python scripts/senior_exam_writer.py init-runtime \
+  --db ./exam_evidence.sqlite \
+  --embed-url http://127.0.0.1:8081 \
+  --llm-url http://127.0.0.1:8080
+```
+
+3. Split the user's entry requirement into executable stage prompts when the request starts as natural language rather than ready JSON. Use the prompt package to fill task JSON, source collection, knowledge planning, evidence planning, multi-writer, reviewer, similarity review, and final approval steps.
+
+```bash
+python scripts/senior_exam_writer.py split-requirements \
+  --requirements "entry requirement text" \
+  --writer-count 3 \
+  --output-json ./prompt_package.json \
+  --output-jsonl ./prompt_stages.jsonl
+```
+
+4. Create an auditable exam task from the actual outline, question-bank policy, proposition rules, extra requirements, and coverage plan. These values may be JSON strings or JSON files.
 
 ```bash
 python scripts/senior_exam_writer.py create-task \
@@ -45,7 +64,7 @@ python scripts/senior_exam_writer.py create-task \
   --coverage ./coverage.json
 ```
 
-3. Ingest course materials. Prefer `--embed` with a local llama.cpp embedding server; use `--no-embed` only for BM25-only indexing or offline testing. Ingestion blocks exact and near-duplicate chunks by default and records blocked duplicates in `ingest_duplicates`.
+5. Ingest course materials with local embeddings. Use `--no-embed` only for BM25-only indexing or offline tests.
 
 ```bash
 python scripts/senior_exam_writer.py ingest \
@@ -61,24 +80,12 @@ Use source kinds intentionally:
 - `syllabus` or `outline`: exam scope and cognitive-level calibration.
 - `exam_rules` or `requirements`: hard proposition constraints.
 - `question_bank`: prior style and common traps only; do not copy items.
+- `historical_exam`: prior real exam items for local duplicate review and style signals only; do not copy them.
 - `qa`: user-provided knowledge Q&A, split and retrieved as supplemental evidence.
 - `book`, `handout`, `notes`: core course evidence.
-- `current_affairs`: dated auxiliary or current-politics素材.
+- `current_affairs`: dated auxiliary or current-politics material.
 
-4. Ingest dated current-affairs or current-politics素材 when it is used as background or auxiliary material:
-
-```bash
-python scripts/senior_exam_writer.py ingest \
-  --db ./exam_evidence.sqlite \
-  --input ./current_affairs.jsonl \
-  --kind current_affairs \
-  --source-name "official/user-approved source" \
-  --published-at 2026-05-10 \
-  --embed \
-  --embed-url http://127.0.0.1:8081
-```
-
-5. When URL sources are provided or discovered, collect them into an auditable JSONL before ingestion:
+6. Collect URL sources into reusable local files before ingestion. Downloaded online material is cached locally and should be reused instead of pasted into the chat context.
 
 ```bash
 python scripts/senior_exam_writer.py collect-urls \
@@ -92,7 +99,20 @@ python scripts/senior_exam_writer.py collect-urls \
   --embed
 ```
 
-6. Audit duplicate controls if source overlap is suspected:
+7. When historical exam coverage is thin, collect prior papers or online historical items into reusable local files, then ingest the normalized JSONL as `historical_exam`.
+
+```bash
+python scripts/senior_exam_writer.py collect-exam-sources \
+  --url https://example.edu/prior-exam \
+  --input ./local_prior_exams \
+  --output-jsonl ./historical_exam_collected.jsonl \
+  --out-dir ./historical_exam_sources \
+  --db ./exam_evidence.sqlite \
+  --ingest \
+  --embed
+```
+
+8. Audit duplicate controls if source overlap is suspected:
 
 ```bash
 python scripts/senior_exam_writer.py audit-duplicates \
@@ -100,23 +120,26 @@ python scripts/senior_exam_writer.py audit-duplicates \
   --backfill
 ```
 
-7. Inspect retrieval before generating:
+9. Plan knowledge and evidence in batches. Knowledge-point matching and evidence-point generation may run in parallel when source coverage is already available; missing evidence points are routed to evidence backfill rather than repeated prompting.
 
 ```bash
-python scripts/senior_exam_writer.py retrieve \
+python scripts/senior_exam_writer.py plan-knowledge \
   --db ./exam_evidence.sqlite \
-  --query "新时代党的建设 总要求" \
-  --top-k 8 \
+  --task-id TASK_ID
+
+python scripts/senior_exam_writer.py plan-evidence \
+  --db ./exam_evidence.sqlite \
+  --task-id TASK_ID \
   --embed-url http://127.0.0.1:8081
 ```
 
-8. Generate questions locally with evidence gate, task constraints, prior-knowledge-point de-duplication, and verification:
+10. Generate one final run locally with evidence gate, task constraints, prior-knowledge-point de-duplication, and verification when using the classic path:
 
 ```bash
 python scripts/senior_exam_writer.py generate \
   --db ./exam_evidence.sqlite \
   --task-id TASK_ID \
-  --topic "新时代党的建设 总要求" \
+  --topic "course topic" \
   --question-type single_choice \
   --count 5 \
   --difficulty medium \
@@ -127,9 +150,45 @@ python scripts/senior_exam_writer.py generate \
   --llm-verify
 ```
 
-9. Record the reviewer decision. A human reviewer may approve, request revision, or reject; the original generation record remains auditable.
+11. For the closed-loop path, fan out each planning unit to multiple writers, then fill candidate outputs through the local generation process or an orchestrator that writes `candidate_questions.output_json` and `verification_json`.
 
 ```bash
+python scripts/senior_exam_writer.py generate-candidates \
+  --db ./exam_evidence.sqlite \
+  --planning-unit-id PLANNING_UNIT_ID \
+  --topic "course topic" \
+  --writer-count 3
+```
+
+12. Run mandatory local historical duplicate review before approval. The command uses local embeddings only and fails when question text has not been generated. Use `--planning-unit-id` for candidate batches or `--question-id` for final question records.
+
+```bash
+python scripts/senior_exam_writer.py audit-question-similarity \
+  --db ./exam_evidence.sqlite \
+  --planning-unit-id PLANNING_UNIT_ID \
+  --task-id TASK_ID \
+  --embed-url http://127.0.0.1:8081
+```
+
+13. Review candidates against the outline, evidence points, and similarity audit. Route failures back to the correct stage: writer revision, replanning, or evidence backfill.
+
+```bash
+python scripts/senior_exam_writer.py review-candidate \
+  --db ./exam_evidence.sqlite \
+  --candidate-id CANDIDATE_ID \
+  --decision evidence_gap \
+  --reason-code evidence_missing \
+  --notes "add stronger citations before the next writer round"
+```
+
+14. Record the final reviewer decision. A human reviewer may approve, request revision, or reject; the original generation record remains auditable. Approval is blocked unless verification passed and a local similarity audit for the final question passes.
+
+```bash
+python scripts/senior_exam_writer.py audit-question-similarity \
+  --db ./exam_evidence.sqlite \
+  --question-id QUESTION_ID \
+  --embed-url http://127.0.0.1:8081
+
 python scripts/senior_exam_writer.py review-question \
   --db ./exam_evidence.sqlite \
   --question-id QUESTION_ID \
@@ -138,7 +197,7 @@ python scripts/senior_exam_writer.py review-question \
   --notes "meets outline and evidence rules"
 ```
 
-10. Check completion status:
+15. Check completion status:
 
 ```bash
 python scripts/senior_exam_writer.py task-status \
@@ -146,7 +205,7 @@ python scripts/senior_exam_writer.py task-status \
   --task-id TASK_ID
 ```
 
-11. Mark the task complete only through the script gate. This fails if approved items do not satisfy coverage, review, verification, and knowledge-point de-duplication rules.
+16. Mark the task complete only through the script gate. This fails if approved items do not satisfy coverage, review, verification, historical duplicate review, and knowledge-point de-duplication rules.
 
 ```bash
 python scripts/senior_exam_writer.py complete-task \

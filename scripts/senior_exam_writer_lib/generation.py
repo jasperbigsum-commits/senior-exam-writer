@@ -10,6 +10,21 @@ from .evidence_roles import ITEM_EVIDENCE_ROLE_ORDER, ITEM_ROLE_TO_EVIDENCE_ROLE
 from .llama_cpp_client import llama_chat
 from .retrieval import evidence_to_json
 
+def build_candidate_prompt_record(
+    writer_id: str,
+    planning_unit_id: str,
+    topic: str,
+    knowledge_points: list[str],
+    evidence_points: dict[str, list[str]],
+) -> dict[str, Any]:
+    return {
+        "writer_id": writer_id,
+        "planning_unit_id": planning_unit_id,
+        "topic": topic,
+        "knowledge_points": knowledge_points,
+        "evidence_points": evidence_points,
+    }
+
 def build_generation_prompt(
     topic: str,
     question_type: str,

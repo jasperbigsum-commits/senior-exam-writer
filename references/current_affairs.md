@@ -89,6 +89,8 @@ python scripts/senior_exam_writer.py collect-urls \
 
 The generated JSONL records include `retrieval_query`, `retrieved_at`, `raw_path`, `content_type`, URL, source, date when detected, and extracted text.
 
+For repeated scans, reuse the local raw and normalized files created by `collect-urls` or `collect-exam-sources`. Do not paste large online materials into the chat context when the sidecar cache can be ingested and cited from SQLite.
+
 ## Freshness Rules
 
 - Use `--strict-current` for politics, policy, leaders, institutions, economic indicators, live disputes, or any topic likely to change.

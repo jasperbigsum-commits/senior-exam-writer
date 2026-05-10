@@ -96,6 +96,17 @@ Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdow
 
 ## Audit Questions
 
+## Closed-Loop Review Additions
+
+- Use `plan-knowledge` to expand coverage into planning units before candidate generation.
+- Use `plan-evidence` to bind knowledge points to evidence points; knowledge matching and evidence-point generation may run in parallel when the corpus is already indexed.
+- Use `collect-exam-sources` for prior real exam papers or online historical items; downloaded raw and normalized files should be reused from local cache.
+- Ingest prior real exams as `historical_exam`; they are comparison material for duplicate review and style signals, not factual answer support.
+- Use `generate-candidates` to create a multi-writer candidate pool for one planning unit.
+- Use `audit-question-similarity` with a local embedding endpoint before any candidate or final question approval.
+- Store duplicate-review evidence in `question_similarity_audits` and `question_similarity_hits`.
+- Use `review-candidate` to route weak candidates back to writer revision, replanning, or evidence backfill.
+
 Use these questions when reviewing a run:
 
 - Was the source type correctly classified?
@@ -113,6 +124,8 @@ Use these questions when reviewing a run:
 - Does the item avoid prior covered knowledge points for the same task?
 - Does each wrong option have a documented wrong reason?
 - Did the verifier reject unsupported or contradicted claims?
+- Did `audit-question-similarity` run with a local embedding endpoint before approval?
+- Were high-similarity historical hits routed back to writers, replanning, or evidence backfill?
 - Did script policy validation reject missing task, source, fingerprint, type-specific field, or completion requirements?
 - Are current-affairs dates, sources, URLs, and review windows present when needed?
 - Did the human reviewer approve, request revision, or reject the item?

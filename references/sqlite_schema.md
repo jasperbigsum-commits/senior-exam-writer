@@ -8,7 +8,7 @@ The database is a local evidence store. It is intentionally simple enough to ins
 
 - one row per ingested file or current-affairs item;
 - stores title, path, kind, date, source, URL, version, and metadata JSON.
-- supported kinds include `book`, `handout`, `outline`, `syllabus`, `exam_rules`, `question_bank`, `qa`, `requirements`, `current_affairs`, and `notes`.
+- supported kinds include `book`, `handout`, `outline`, `syllabus`, `exam_rules`, `question_bank`, `historical_exam`, `qa`, `requirements`, `current_affairs`, and `notes`.
 - a source may have zero chunks when all of its candidate chunks were blocked as duplicates; this preserves provenance without polluting retrieval.
 
 `chunks`
@@ -47,6 +47,37 @@ The database is a local evidence store. It is intentionally simple enough to ins
 - stores blocked duplicate candidates with duplicate target, layer, path, similarity, reason, and sample text.
 - keeps duplicate-source evidence auditable without polluting FTS/vector retrieval.
 - duplicate reasons include `exact_normalized_text`, `near_duplicate_ngrams`, and, when embeddings are enabled, `semantic_embedding`.
+
+`planning_units`
+
+- stores coverage-derived planning units for batched knowledge and evidence planning.
+- includes question type, difficulty, knowledge/evidence status, writer round, and review status.
+
+`evidence_points`
+
+- stores knowledge-point to evidence-id bindings for each planning unit.
+- supports evidence gap routing before candidate generation.
+
+`candidate_questions`
+
+- stores multi-writer candidate prompts and outputs.
+- includes `writer_id`, `round`, `prompt_json`, `output_json`, and `verification_json` for auditability.
+
+`candidate_reviews`
+
+- stores reviewer routing decisions for candidates.
+- decisions include `approved_candidate`, `revise_candidate`, `replan_required`, `evidence_gap`, and `rejected_candidate`.
+
+`question_similarity_audits`
+
+- stores local embedding duplicate-review audits for candidates or final questions.
+- `candidate_question_id` may be null when the audit targets `question_id`.
+- `blocked_duplicate` and `revise_required` block approval.
+
+`question_similarity_hits`
+
+- stores top historical/prior-question hits for each similarity audit.
+- comparison sources are `historical_exam` and `question_bank`, not factual answer support.
 
 ## Retrieval Pattern
 

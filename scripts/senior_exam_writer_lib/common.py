@@ -25,6 +25,7 @@ SOURCE_KINDS = [
     "syllabus",
     "exam_rules",
     "question_bank",
+    "historical_exam",
     "qa",
     "requirements",
     "current_affairs",

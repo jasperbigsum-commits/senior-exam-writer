@@ -18,7 +18,10 @@ An exam-writing task may include:
 
 ## Required Flow
 
-1. Create or update an exam task.
+1. Initialize the local runtime and create or update an exam task.
+   - Use `init-runtime` before collection, planning, generation, or review.
+   - Embedding and generation URLs must be local loopback endpoints.
+   - When the entry request is natural language, use `split-requirements` first to produce stage prompts for task definition, source collection, planning, writers, reviewers, similarity review, and final approval.
    - Store outline, source policy, proposition rules, requirements, and coverage plan in `exam_tasks`.
    - Use `create-task`; do not leave core requirements only in chat memory.
    - Script gate: `outline`, `source_policy`, `question_rules`, `requirements`, and `coverage` must be non-empty JSON objects. Citations, review, and knowledge-point de-duplication must be explicitly enabled.
@@ -30,8 +33,14 @@ An exam-writing task may include:
    - `qa`: supplemental evidence after splitting into retrievable Q&A chunks.
    - `book` / `handout` / `notes`: core course evidence.
    - `current_affairs`: dated background material.
+   - `historical_exam`: prior real exam items for duplicate review and style signals only.
 
-3. De-duplicate the knowledge base before retrieval.
+3. Collect online material into reusable local files before ingestion.
+   - Use `collect-urls` for current-affairs/background sources.
+   - Use `collect-exam-sources` for prior real exam papers or online historical items.
+   - Persist downloaded raw and normalized files locally; reuse them across scans instead of pasting source text into chat.
+
+4. De-duplicate the knowledge base before retrieval.
    - Every ingested chunk gets a normalized fingerprint.
    - Exact or near-duplicate chunks are blocked from `chunks` and `chunks_fts`.
    - When `--embed` is enabled, high-similarity embedding matches are also blocked as semantic duplicates.
@@ -41,38 +50,52 @@ An exam-writing task may include:
    - This prevents repeated copies from inflating retrieval confidence or polluting evidence.
    - Script gate: `--allow-duplicate-chunks` is rejected by default policy, missing chunk fingerprints block generation, and duplicate fingerprints block generation until cleaned.
 
-4. Retrieve before generating.
+5. Plan the coverage batch before generating.
+   - Use `plan-knowledge` to expand the stored coverage plan into planning units.
+   - Use `plan-evidence` to bind knowledge points to evidence points.
+   - Knowledge-point matching and evidence-point generation may run in parallel when sources are already indexed.
+   - Missing evidence is routed to evidence backfill instead of repeated prompt loops.
+
+6. Retrieve before generating.
    - Retrieval combines TOC/overview routing, BM25, optional llama.cpp embeddings, and parent-context expansion.
    - Evidence is role-labeled as `exam_specification`, `core_course_evidence`, `prior_question_style`, `supplemental_qa_evidence`, or `background_current_affairs`.
 
-5. Collect extra real-time/current-affairs material only when needed.
+7. Collect extra real-time/current-affairs material only when needed.
    - If the topic depends on current policy, events, institutions, dates, or public materials, collect URLs into JSONL with `collect-urls`.
    - Ingest collected JSONL before use; live facts are not usable until they are in the SQLite evidence store.
    - For political/current-affairs material, preserve source, date, URL/file locator, and review date or freshness note.
 
-6. Generate under task constraints.
+8. Generate under task constraints.
    - `generate --task-id` passes the stored outline, rules, requirements, coverage plan, and prior accepted/unrejected knowledge points to the writer.
+   - `generate-candidates` fans out one planning unit to multiple writers so candidates can be compared before promotion.
    - Each item must include `knowledge_points`, `coverage_target`, `style_profile`, `difficulty_rationale`, citations, assertions, evidence roles, and `dedup_check`.
    - Choice items must include `option_audit`; short-answer items must include `scoring_points`; material-analysis items must include `material`.
    - Question-bank sources may guide style and common pitfalls, but generated items must not copy previous items.
    - Script gate: generation requires `--task-id`, task-valid source policy, indexed required sources, evidence from answer-supporting source kinds, and `--llm-verify`.
 
-7. Verify and reject weak output.
+9. Verify and reject weak output.
    - Evidence gate blocks thin or unlocatable evidence.
    - Static verification blocks missing citations, missing knowledge points, repeated in-batch knowledge points, invalid answer labels, or missing difficulty/style audit fields.
    - Optional local LLM verification checks factual support against evidence only.
    - If verification fails, rewrite once; if still weak, store a refusal report.
 
-8. Human reviewer loop.
-   - The reviewer records `approved`, `revise`, or `rejected` with `review-question`.
+10. Run mandatory historical duplicate review.
+   - Use `audit-question-similarity` after candidate or final question text exists.
+   - The command uses local embeddings and fails closed when the endpoint is not local, text is missing, or vector counts mismatch.
+   - `historical_exam` and `question_bank` sources are comparison corpora; they do not provide factual answer support.
+   - `blocked_duplicate` and `revise_required` results block approval.
+
+11. Human reviewer loop.
+   - Use `review-candidate` to approve a candidate or route it back to a writer, replanning, or evidence backfill.
+   - Use `review-question` only after the final question has passed verification and local similarity review.
    - Rejected questions are excluded from prior accepted coverage; revision requests remain auditable.
    - Reviewer patches may be stored as JSON without overwriting the original generation record.
-   - Script gate: approval is blocked unless the stored question status is `ok`, output status is `ok`, and verification passed.
+   - Script gate: approval is blocked unless the stored question status is `ok`, output status is `ok`, verification passed, and historical duplicate review passed.
 
-9. Finish only when task coverage is satisfied.
+12. Finish only when task coverage is satisfied.
    - Use `task-status` to inspect source counts, run counts, review decisions, and covered knowledge points.
    - Continue generation until the coverage plan is complete, evidence is sufficient, no repeated knowledge points are present, and reviewer decisions meet the task policy.
-   - Use `complete-task` to mark completion. Script gate: approved item count, per-target coverage, difficulty/type distribution, verification, reviewer approval, and knowledge-point uniqueness must pass.
+   - Use `complete-task` to mark completion. Script gate: approved item count, per-target coverage, difficulty/type distribution, verification, historical duplicate review, reviewer approval, and knowledge-point uniqueness must pass.
 
 ## Boundary Rules
 

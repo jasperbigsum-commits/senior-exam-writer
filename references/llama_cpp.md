@@ -22,6 +22,15 @@ Then call the script with:
 --embed-url http://127.0.0.1:8081 --llm-url http://127.0.0.1:8080
 ```
 
+Initialize and probe the local runtime before running the closed loop:
+
+```bash
+python scripts/senior_exam_writer.py init-runtime \
+  --db ./exam_evidence.sqlite \
+  --embed-url http://127.0.0.1:8081 \
+  --llm-url http://127.0.0.1:8080
+```
+
 Environment variable alternatives:
 
 ```bash
@@ -46,3 +55,5 @@ Use an embedding model suitable for Chinese semantic retrieval, for example a BG
 - Increase `--top-k` and `--min-evidence` for high-stakes current-affairs topics.
 - Use `--no-embed` only for fast indexing tests; semantic retrieval quality will drop.
 - Keep temperature low for exam generation: the script defaults to `0.2`.
+- Historical duplicate review requires local embeddings. `audit-question-similarity` refuses non-loopback `--embed-url` values and fails closed when candidate/final question text is missing.
+- For closed-loop review, ingest `historical_exam` and `question_bank` sources with embeddings before approval.

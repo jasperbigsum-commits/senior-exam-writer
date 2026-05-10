@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from .common import SOURCE_KINDS
+
 ANSWER_EVIDENCE_KINDS = {"book", "handout", "notes", "qa"}
 SPEC_EVIDENCE_KINDS = {"outline", "syllabus", "exam_rules", "requirements"}
+PRIOR_STYLE_EVIDENCE_KINDS = {"question_bank", "historical_exam"}
 
 ROLE_CORE = "core_course_evidence"
 ROLE_SPEC = "exam_specification"
@@ -18,30 +21,33 @@ ITEM_ROLE_TO_EVIDENCE_ROLE = {
     "prior_style": ROLE_PRIOR_STYLE,
     "qa": ROLE_QA,
 }
+SOURCE_KIND_TO_ITEM_ROLE = {
+    "book": "core",
+    "handout": "core",
+    "outline": "specification",
+    "syllabus": "specification",
+    "exam_rules": "specification",
+    "question_bank": "prior_style",
+    "historical_exam": "prior_style",
+    "qa": "qa",
+    "requirements": "specification",
+    "current_affairs": "background",
+    "notes": "core",
+}
+
+
+def _validated_item_role(source_kind: str) -> str:
+    if source_kind not in SOURCE_KINDS:
+        raise ValueError(f"Unsupported source kind: {source_kind}")
+    return SOURCE_KIND_TO_ITEM_ROLE[source_kind]
 
 
 def role_for_source_kind(source_kind: str) -> str:
-    if source_kind == "current_affairs":
-        return ROLE_CURRENT
-    if source_kind in SPEC_EVIDENCE_KINDS:
-        return ROLE_SPEC
-    if source_kind == "question_bank":
-        return ROLE_PRIOR_STYLE
-    if source_kind == "qa":
-        return ROLE_QA
-    return ROLE_CORE
+    return ITEM_ROLE_TO_EVIDENCE_ROLE[_validated_item_role(source_kind)]
 
 
 def item_role_for_source_kind(source_kind: str) -> str:
-    if source_kind == "current_affairs":
-        return "background"
-    if source_kind in SPEC_EVIDENCE_KINDS:
-        return "specification"
-    if source_kind == "question_bank":
-        return "prior_style"
-    if source_kind == "qa":
-        return "qa"
-    return "core"
+    return _validated_item_role(source_kind)
 
 
 def is_answer_evidence_kind(source_kind: str) -> bool:

@@ -13,6 +13,10 @@ from typing import Any
 from .common import DEFAULT_USER_AGENT, SUPPORTED_SUFFIXES, now_iso
 from .parsing import html_to_text, load_document, normalize_ws
 
+
+def sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
 def first_match(patterns: list[str], text: str, flags: int = re.I | re.S) -> str | None:
     for pattern in patterns:
         match = re.search(pattern, text, flags)
@@ -98,12 +102,59 @@ def text_from_download(path: Path, raw: bytes, content_type: str | None) -> tupl
             return normalize_ws("\n".join(text for _, text in parts)), {}
         decoded = raw.decode("utf-8", errors="replace")
         if "html" in ctype or re.search(r"<html|<!doctype html", decoded[:1000], re.I):
-            return html_to_text(decoded), extract_html_metadata(decoded, "")
+            return html_to_text(decoded), {}
         if path.suffix.lower() in {".json", ".jsonl"}:
             return decoded, {}
         return normalize_ws(decoded), {}
     except Exception as exc:
         return "", {"extraction_error": str(exc)}
+
+
+def collect_local_records(
+    *,
+    local_paths: list[Path],
+    out_dir: Path,
+    source_name: str | None,
+    tags: list[str],
+    query: str | None,
+) -> list[dict[str, Any]]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    for local_path in local_paths:
+        path = Path(local_path)
+        if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES:
+            files.append(path)
+            continue
+        if path.is_dir():
+            for child in sorted(path.rglob("*")):
+                if child.is_file() and child.suffix.lower() in SUPPORTED_SUFFIXES:
+                    files.append(child)
+
+    records: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    for path in files:
+        raw = path.read_bytes()
+        content_hash = sha256_bytes(raw)
+        if content_hash in seen_hashes:
+            continue
+        seen_hashes.add(content_hash)
+        extracted_text, extra_meta = text_from_download(path, raw, None)
+        record = {
+            "title": path.stem,
+            "date": None,
+            "source": source_name or str(path.parent),
+            "url": None,
+            "tags": tags,
+            "retrieval_query": query,
+            "retrieved_at": now_iso(),
+            "raw_path": str(path.resolve()),
+            "content_type": None,
+            "content_hash": content_hash,
+            "full_text": extracted_text,
+        }
+        record.update(extra_meta)
+        records.append(record)
+    return records
 
 def read_url_list(urls: list[str] | None, url_file: str | None) -> list[str]:
     collected: list[str] = []
@@ -161,6 +212,7 @@ def collect_urls(
             "retrieved_at": now_iso(),
             "raw_path": str(raw_path.resolve()),
             "content_type": content_type,
+            "content_hash": sha256_bytes(raw),
             "full_text": extracted_text,
         }
         record.update(extra_meta)
@@ -170,3 +222,52 @@ def collect_urls(
         for record in records:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     return {"count": len(records), "jsonl": str(jsonl_path.resolve()), "records": records}
+
+
+def collect_exam_sources(
+    *,
+    urls: list[str],
+    local_paths: list[Path],
+    out_dir: Path,
+    jsonl_path: Path,
+    source_name: str | None,
+    tags: list[str],
+    query: str | None,
+    timeout: int,
+    user_agent: str,
+) -> dict[str, Any]:
+    records = collect_local_records(
+        local_paths=local_paths,
+        out_dir=out_dir,
+        source_name=source_name,
+        tags=tags,
+        query=query,
+    )
+    if urls:
+        url_result = collect_urls(
+            urls=urls,
+            out_dir=out_dir,
+            jsonl_path=jsonl_path,
+            source_name=source_name,
+            tags=tags,
+            query=query,
+            timeout=timeout,
+            user_agent=user_agent,
+        )
+        records.extend(url_result["records"])
+
+    deduped: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    for record in records:
+        content_hash = record.get("content_hash")
+        if not content_hash or content_hash in seen_hashes:
+            continue
+        seen_hashes.add(content_hash)
+        deduped.append(record)
+
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    with jsonl_path.open("w", encoding="utf-8") as fh:
+        for record in deduped:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    return {"count": len(deduped), "jsonl": str(jsonl_path.resolve()), "records": deduped}
