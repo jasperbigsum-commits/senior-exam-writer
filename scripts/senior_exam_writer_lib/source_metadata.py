@@ -54,3 +54,26 @@ def current_affairs_metadata_issues(
     if not url and input_path.suffix.lower() not in {".json", ".jsonl"}:
         issues.append("current_affairs ingestion requires --url for non-JSON source files")
     return issues
+
+
+def metadata_from_structured_text(text: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    key_map = {
+        "date": "published_at",
+        "published_at": "published_at",
+        "publish_date": "published_at",
+        "source": "source_name",
+        "source_name": "source_name",
+        "url": "source_url",
+        "raw_path": "source_path",
+    }
+    for line in (text or "").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        normalized_key = key.strip().lower()
+        target = key_map.get(normalized_key)
+        value = value.strip()
+        if target and value:
+            metadata[target] = value
+    return metadata

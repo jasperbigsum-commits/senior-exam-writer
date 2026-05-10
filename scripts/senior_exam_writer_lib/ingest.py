@@ -17,6 +17,7 @@ from .dedup import (
 )
 from .llama_cpp_client import llama_embed
 from .parsing import approx_tokens, chunk_text, load_document, sections_from_parts
+from .source_metadata import metadata_from_structured_text
 
 def collect_files(input_path: Path) -> list[Path]:
     if input_path.is_file():
@@ -186,6 +187,7 @@ def ingest_file(
         ),
     )
 
+    section_metadata = [metadata_from_structured_text(section.text) if kind == "current_affairs" else {} for section in sections]
     overview_text = "\n".join(section.text[:500] for section in sections[:3])[:1800]
     overview_id = stable_id(source_id, "overview")
     toc_text = "\n".join(toc_titles[:500]) or "\n".join(section.path for section in sections[:200])
@@ -225,6 +227,7 @@ def ingest_file(
     parent_count = 0
     child_count = 0
     for sidx, section in enumerate(sections, 1):
+        metadata = section_metadata[sidx - 1] if sidx - 1 < len(section_metadata) else {}
         parent_id = stable_id(source_id, "parent", str(sidx), section.path, section.text[:200])
         parent_vec = batch_embed([f"{section.path}\n{section.text[:1800]}"], embed, embed_url, embed_model)[0]
         parent_inserted, _duplicate_parent = insert_unique_chunk(
@@ -237,7 +240,7 @@ def ingest_file(
             title=section.title,
             locator=section.locator,
             text=section.text,
-            metadata={"level": section.level},
+            metadata={"level": section.level, **metadata},
             embedding=parent_vec,
             dedup=dedup,
             dedup_threshold=dedup_threshold,
@@ -261,7 +264,7 @@ def ingest_file(
                 title=section.title,
                 locator=f"{section.locator}#chunk-{cidx}",
                 text=child,
-                metadata={"level": section.level, "chunk_index": cidx},
+                metadata={"level": section.level, "chunk_index": cidx, **metadata},
                 embedding=child_vec,
                 dedup=dedup,
                 dedup_threshold=dedup_threshold,

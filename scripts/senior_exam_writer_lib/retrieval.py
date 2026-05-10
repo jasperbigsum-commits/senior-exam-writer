@@ -44,6 +44,15 @@ def load_vector(raw: str | None) -> list[float] | None:
     except Exception:
         return None
 
+def load_metadata(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
 def keyword_substring_score(query: str, text: str, path: str, title: str) -> float:
     haystack = f"{title}\n{path}\n{text}".lower()
     score = 0.0
@@ -172,6 +181,7 @@ def retrieve_evidence(
     seen_text: set[str] = set()
     for idx, item in enumerate(ranked, 1):
         row = item["row"]
+        metadata = load_metadata(row["metadata_json"])
         digest = hashlib.sha1((row["text"] or "")[:500].encode("utf-8", errors="ignore")).hexdigest()
         if digest in seen_text:
             continue
@@ -190,9 +200,9 @@ def retrieve_evidence(
                 source_title=row["source_title"] or "",
                 source_path=row["source_path"] or "",
                 source_kind=row["kind"],
-                source_name=row["source_name"],
-                source_url=row["url"],
-                published_at=row["published_at"],
+                source_name=row["source_name"] or metadata.get("source_name"),
+                source_url=row["url"] or metadata.get("source_url"),
+                published_at=row["published_at"] or metadata.get("published_at"),
             )
         )
         if len(evidences) >= top_k:
