@@ -16,6 +16,7 @@ The central rule is: retrieve evidence first, generate second, verify last; refu
 - Calibrate style, cognitive level, and difficulty against the syllabus/outline: read [references/style_difficulty.md](references/style_difficulty.md).
 - Add or review current-affairs/current-politics素材: read [references/current_affairs.md](references/current_affairs.md).
 - Download and normalize user-approved URLs into JSONL evidence: use `collect-urls`.
+- Audit module boundaries and responsibilities: read [references/module_boundaries.md](references/module_boundaries.md).
 - Change grounding, citation, or verification behavior: read [references/evidence_gate.md](references/evidence_gate.md).
 - Configure local embedding/generation: read [references/llama_cpp.md](references/llama_cpp.md).
 - Inspect or extend SQLite tables: read [references/sqlite_schema.md](references/sqlite_schema.md).
@@ -110,3 +111,17 @@ python scripts/senior_exam_writer.py generate \
 Return question packages as JSON by default. Keep rejected runs useful: include the missing evidence types, the strongest retrieved snippets, and what material the user should add.
 
 Never invent dates, names, institutions, policies, page numbers, URLs, or citations. Do not "smooth over" missing support with generic knowledge.
+
+## Module Boundary
+
+Keep the script implementation modular:
+
+- `common.py`: shared dataclasses, constants, and stable IDs.
+- `store.py`: SQLite connection and schema only.
+- `parsing.py`: local file parsing and chunk shaping only.
+- `collection.py`: URL download and source normalization only.
+- `ingest.py`: source/chunk insertion and embedding attachment only.
+- `retrieval.py`: keyword/vector retrieval, parent expansion, and evidence JSON only.
+- `generation.py`: prompt construction, output parsing, refusal, and verification only.
+- `cli.py`: command-line orchestration only.
+- `senior_exam_writer.py`: thin compatibility wrapper only.
