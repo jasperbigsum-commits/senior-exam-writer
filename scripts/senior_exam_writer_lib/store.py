@@ -169,15 +169,12 @@ def init_db(conn: sqlite3.Connection) -> None:
           task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE,
           planning_unit_id TEXT REFERENCES planning_units(id) ON DELETE SET NULL,
           question_type TEXT NOT NULL,
-          prompt_text TEXT NOT NULL,
-          draft_json TEXT NOT NULL DEFAULT '{}',
           writer_id TEXT NOT NULL DEFAULT '',
           round INTEGER NOT NULL DEFAULT 0,
           prompt_json TEXT NOT NULL DEFAULT '{}',
           output_json TEXT NOT NULL DEFAULT '{}',
           verification_json TEXT NOT NULL DEFAULT '{}',
           status TEXT NOT NULL,
-          metadata_json TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -190,7 +187,6 @@ def init_db(conn: sqlite3.Connection) -> None:
           reason_code TEXT NOT NULL DEFAULT '',
           notes TEXT,
           review_json TEXT NOT NULL DEFAULT '{}',
-          patch_json TEXT NOT NULL DEFAULT '{}',
           reviewed_at TEXT NOT NULL
         );
 
@@ -204,10 +200,7 @@ def init_db(conn: sqlite3.Connection) -> None:
           threshold_policy_json TEXT NOT NULL DEFAULT '{}',
           audit_result TEXT NOT NULL DEFAULT '',
           audit_summary_json TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL DEFAULT '',
-          compared_at TEXT NOT NULL,
-          threshold REAL,
-          summary_json TEXT NOT NULL DEFAULT '{}'
+          created_at TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS question_similarity_hits (
@@ -220,10 +213,6 @@ def init_db(conn: sqlite3.Connection) -> None:
           similarity_score REAL,
           match_reason TEXT NOT NULL DEFAULT '',
           snippet TEXT,
-          similarity REAL NOT NULL,
-          match_kind TEXT NOT NULL,
-          excerpt_text TEXT,
-          metadata_json TEXT NOT NULL DEFAULT '{}',
           created_at TEXT NOT NULL
         );
 
@@ -328,6 +317,7 @@ def _ensure_evidence_points_columns(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_candidate_questions_columns(conn: sqlite3.Connection) -> None:
+    _rebuild_candidate_questions_if_legacy(conn)
     _ensure_column(conn, "candidate_questions", "writer_id", "writer_id TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "candidate_questions", "round", "round INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "candidate_questions", "prompt_json", "prompt_json TEXT NOT NULL DEFAULT '{}'")
@@ -336,14 +326,15 @@ def _ensure_candidate_questions_columns(conn: sqlite3.Connection) -> None:
 
 
 def _ensure_candidate_reviews_columns(conn: sqlite3.Connection) -> None:
-    _rebuild_candidate_reviews_if_legacy_check(conn)
+    _rebuild_candidate_reviews_if_legacy(conn)
     _ensure_column(conn, "candidate_reviews", "reason_code", "reason_code TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "candidate_reviews", "review_json", "review_json TEXT NOT NULL DEFAULT '{}'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_candidate_reviews_question ON candidate_reviews(candidate_question_id)")
 
 
 def _ensure_similarity_review_columns(conn: sqlite3.Connection) -> None:
-    _rebuild_similarity_audits_if_candidate_required(conn)
+    _rebuild_similarity_audits_if_legacy(conn)
+    _rebuild_similarity_hits_if_legacy(conn)
     _ensure_column(
         conn,
         "question_similarity_audits",
@@ -410,11 +401,60 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {_column_name(row) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
 
-def _rebuild_candidate_reviews_if_legacy_check(conn: sqlite3.Connection) -> None:
-    table_sql = _table_sql(conn, "candidate_reviews")
-    if "CHECK(decision IN ('approved', 'revise', 'rejected'))" not in table_sql:
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _rebuild_candidate_questions_if_legacy(conn: sqlite3.Connection) -> None:
+    existing_columns = _table_columns(conn, "candidate_questions")
+    if not {"prompt_text", "draft_json", "metadata_json"} & existing_columns:
         return
+    prompt_expr = "prompt_json" if "prompt_json" in existing_columns else "prompt_text"
+    output_expr = "output_json" if "output_json" in existing_columns else "draft_json"
+    verification_expr = "verification_json" if "verification_json" in existing_columns else _sql_literal("{}")
+    writer_expr = "writer_id" if "writer_id" in existing_columns else _sql_literal("")
+    round_expr = "round" if "round" in existing_columns else "0"
+    conn.executescript(
+        """
+        ALTER TABLE candidate_questions RENAME TO candidate_questions_legacy;
+        CREATE TABLE candidate_questions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT REFERENCES exam_tasks(id) ON DELETE CASCADE,
+          planning_unit_id TEXT REFERENCES planning_units(id) ON DELETE SET NULL,
+          question_type TEXT NOT NULL,
+          writer_id TEXT NOT NULL DEFAULT '',
+          round INTEGER NOT NULL DEFAULT 0,
+          prompt_json TEXT NOT NULL DEFAULT '{}',
+          output_json TEXT NOT NULL DEFAULT '{}',
+          verification_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO candidate_questions
+        (
+          id, task_id, planning_unit_id, question_type, writer_id, round,
+          prompt_json, output_json, verification_json, status, created_at, updated_at
+        )
+        SELECT
+          id, task_id, planning_unit_id, question_type, {writer_expr}, {round_expr},
+          {prompt_expr}, {output_expr}, {verification_expr}, status, created_at, updated_at
+        FROM candidate_questions_legacy
+        """
+    )
+    conn.execute("DROP TABLE candidate_questions_legacy")
+
+
+def _rebuild_candidate_reviews_if_legacy(conn: sqlite3.Connection) -> None:
+    table_sql = _table_sql(conn, "candidate_reviews")
     existing_columns = _table_columns(conn, "candidate_reviews")
+    legacy_check = "CHECK(decision IN ('approved', 'revise', 'rejected'))" in table_sql
+    if not legacy_check and "patch_json" not in existing_columns:
+        return
     reason_expr = "reason_code" if "reason_code" in existing_columns else "''"
     review_expr = "review_json" if "review_json" in existing_columns else "'{}'"
     conn.executescript(
@@ -428,7 +468,6 @@ def _rebuild_candidate_reviews_if_legacy_check(conn: sqlite3.Connection) -> None
           reason_code TEXT NOT NULL DEFAULT '',
           notes TEXT,
           review_json TEXT NOT NULL DEFAULT '{}',
-          patch_json TEXT NOT NULL DEFAULT '{}',
           reviewed_at TEXT NOT NULL
         );
         """
@@ -436,22 +475,39 @@ def _rebuild_candidate_reviews_if_legacy_check(conn: sqlite3.Connection) -> None
     conn.execute(
         f"""
         INSERT INTO candidate_reviews
-        (id, candidate_question_id, reviewer, decision, reason_code, notes, review_json, patch_json, reviewed_at)
-        SELECT id, candidate_question_id, reviewer, decision, {reason_expr}, notes, {review_expr}, patch_json, reviewed_at
+        (id, candidate_question_id, reviewer, decision, reason_code, notes, review_json, reviewed_at)
+        SELECT id, candidate_question_id, reviewer, decision, {reason_expr}, notes, {review_expr}, reviewed_at
         FROM candidate_reviews_legacy
         """
     )
     conn.execute("DROP TABLE candidate_reviews_legacy")
 
 
-def _rebuild_similarity_audits_if_candidate_required(conn: sqlite3.Connection) -> None:
+def _rebuild_similarity_audits_if_legacy(conn: sqlite3.Connection) -> None:
+    existing_columns = _table_columns(conn, "question_similarity_audits")
     notnull_by_column = {
         _column_name(row): int(row["notnull"] if isinstance(row, sqlite3.Row) else row[3])
         for row in conn.execute("PRAGMA table_info(question_similarity_audits)").fetchall()
     }
-    if notnull_by_column.get("candidate_question_id") != 1:
+    legacy_columns = {"compared_at", "threshold", "summary_json"} & existing_columns
+    if not legacy_columns and notnull_by_column.get("candidate_question_id") != 1:
         return
-    existing_columns = _table_columns(conn, "question_similarity_audits")
+    summary_expr = (
+        "audit_summary_json"
+        if "audit_summary_json" in existing_columns
+        else "summary_json"
+        if "summary_json" in existing_columns
+        else _sql_literal("{}")
+    )
+    created_expr = (
+        "CASE WHEN created_at IS NOT NULL AND created_at != '' THEN created_at ELSE compared_at END"
+        if {"created_at", "compared_at"}.issubset(existing_columns)
+        else "created_at"
+        if "created_at" in existing_columns
+        else "compared_at"
+        if "compared_at" in existing_columns
+        else _sql_literal("")
+    )
     exprs = {
         "question_id": "question_id" if "question_id" in existing_columns else "NULL",
         "task_id": "task_id" if "task_id" in existing_columns else "NULL",
@@ -459,11 +515,8 @@ def _rebuild_similarity_audits_if_candidate_required(conn: sqlite3.Connection) -
         "embed_url": "embed_url" if "embed_url" in existing_columns else "''",
         "threshold_policy_json": "threshold_policy_json" if "threshold_policy_json" in existing_columns else "'{}'",
         "audit_result": "audit_result" if "audit_result" in existing_columns else "''",
-        "audit_summary_json": "audit_summary_json" if "audit_summary_json" in existing_columns else "'{}'",
-        "created_at": "created_at" if "created_at" in existing_columns else "compared_at",
-        "compared_at": "compared_at" if "compared_at" in existing_columns else "created_at",
-        "threshold": "threshold" if "threshold" in existing_columns else "NULL",
-        "summary_json": "summary_json" if "summary_json" in existing_columns else "'{}'",
+        "audit_summary_json": summary_expr,
+        "created_at": created_expr,
     }
     conn.executescript(
         """
@@ -478,10 +531,7 @@ def _rebuild_similarity_audits_if_candidate_required(conn: sqlite3.Connection) -
           threshold_policy_json TEXT NOT NULL DEFAULT '{}',
           audit_result TEXT NOT NULL DEFAULT '',
           audit_summary_json TEXT NOT NULL DEFAULT '{}',
-          created_at TEXT NOT NULL DEFAULT '',
-          compared_at TEXT NOT NULL,
-          threshold REAL,
-          summary_json TEXT NOT NULL DEFAULT '{}'
+          created_at TEXT NOT NULL DEFAULT ''
         );
         """
     )
@@ -491,17 +541,82 @@ def _rebuild_similarity_audits_if_candidate_required(conn: sqlite3.Connection) -
         (
           id, candidate_question_id, question_id, task_id, embed_model, embed_url,
           threshold_policy_json, audit_result, audit_summary_json,
-          created_at, compared_at, threshold, summary_json
+          created_at
         )
         SELECT
           id, candidate_question_id, {exprs["question_id"]}, {exprs["task_id"]},
           {exprs["embed_model"]}, {exprs["embed_url"]}, {exprs["threshold_policy_json"]},
-          {exprs["audit_result"]}, {exprs["audit_summary_json"]}, {exprs["created_at"]},
-          {exprs["compared_at"]}, {exprs["threshold"]}, {exprs["summary_json"]}
+          {exprs["audit_result"]}, {exprs["audit_summary_json"]}, {exprs["created_at"]}
         FROM question_similarity_audits_legacy
         """
     )
     conn.execute("DROP TABLE question_similarity_audits_legacy")
+
+
+def _rebuild_similarity_hits_if_legacy(conn: sqlite3.Connection) -> None:
+    existing_columns = _table_columns(conn, "question_similarity_hits")
+    if not {"similarity", "match_kind", "excerpt_text", "metadata_json"} & existing_columns:
+        return
+    similarity_expr = "similarity_score" if "similarity_score" in existing_columns else "similarity"
+    reason_expr = (
+        "CASE WHEN match_reason IS NOT NULL AND match_reason != '' THEN match_reason ELSE match_kind END"
+        if {"match_reason", "match_kind"}.issubset(existing_columns)
+        else "match_reason"
+        if "match_reason" in existing_columns
+        else "match_kind"
+        if "match_kind" in existing_columns
+        else _sql_literal("")
+    )
+    snippet_expr = (
+        "CASE WHEN snippet IS NOT NULL AND snippet != '' THEN snippet ELSE excerpt_text END"
+        if {"snippet", "excerpt_text"}.issubset(existing_columns)
+        else "snippet"
+        if "snippet" in existing_columns
+        else "excerpt_text"
+        if "excerpt_text" in existing_columns
+        else "NULL"
+    )
+    exprs = {
+        "matched_source_kind": "matched_source_kind" if "matched_source_kind" in existing_columns else "''",
+        "matched_source_id": "matched_source_id" if "matched_source_id" in existing_columns else "NULL",
+        "matched_chunk_id": "matched_chunk_id" if "matched_chunk_id" in existing_columns else "NULL",
+        "matched_question_id": "matched_question_id" if "matched_question_id" in existing_columns else "NULL",
+        "similarity_score": similarity_expr,
+        "match_reason": reason_expr,
+        "snippet": snippet_expr,
+    }
+    conn.executescript(
+        """
+        ALTER TABLE question_similarity_hits RENAME TO question_similarity_hits_legacy;
+        CREATE TABLE question_similarity_hits (
+          id TEXT PRIMARY KEY,
+          audit_id TEXT NOT NULL REFERENCES question_similarity_audits(id) ON DELETE CASCADE,
+          matched_source_kind TEXT NOT NULL DEFAULT '',
+          matched_source_id TEXT REFERENCES sources(id) ON DELETE SET NULL,
+          matched_chunk_id TEXT REFERENCES chunks(id) ON DELETE SET NULL,
+          matched_question_id TEXT,
+          similarity_score REAL,
+          match_reason TEXT NOT NULL DEFAULT '',
+          snippet TEXT,
+          created_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO question_similarity_hits
+        (
+          id, audit_id, matched_source_kind, matched_source_id, matched_chunk_id,
+          matched_question_id, similarity_score, match_reason, snippet, created_at
+        )
+        SELECT
+          id, audit_id, {exprs["matched_source_kind"]}, {exprs["matched_source_id"]},
+          {exprs["matched_chunk_id"]}, {exprs["matched_question_id"]},
+          {exprs["similarity_score"]}, {exprs["match_reason"]}, {exprs["snippet"]}, created_at
+        FROM question_similarity_hits_legacy
+        """
+    )
+    conn.execute("DROP TABLE question_similarity_hits_legacy")
 
 
 def ensure_db(conn: sqlite3.Connection) -> None:

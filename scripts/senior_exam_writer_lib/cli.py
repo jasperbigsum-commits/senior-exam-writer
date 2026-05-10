@@ -522,26 +522,22 @@ def cmd_generate_candidates(args: argparse.Namespace) -> None:
             """
             INSERT INTO candidate_questions
             (
-              id, task_id, planning_unit_id, question_type, prompt_text,
-              draft_json, writer_id, round, prompt_json, output_json,
-              verification_json, status, metadata_json, created_at, updated_at
+              id, task_id, planning_unit_id, question_type, writer_id, round,
+              prompt_json, output_json, verification_json, status, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 candidate_id,
                 row["task_id"],
                 args.planning_unit_id,
                 row["question_type"] or "single_choice",
-                json.dumps(prompt_record, ensure_ascii=False),
-                json.dumps(output_record, ensure_ascii=False),
                 writer_id,
                 writer_round,
                 json.dumps(prompt_record, ensure_ascii=False),
                 json.dumps(output_record, ensure_ascii=False),
                 json.dumps(verification_record, ensure_ascii=False),
                 "pending_generation",
-                json.dumps({"writer_id": writer_id, "round": writer_round}, ensure_ascii=False),
                 created_at,
                 created_at,
             ),
@@ -624,9 +620,9 @@ def cmd_audit_question_similarity(args: argparse.Namespace) -> None:
             (
               id, candidate_question_id, question_id, task_id, embed_model, embed_url,
               threshold_policy_json, audit_result, audit_summary_json,
-              created_at, compared_at, threshold, summary_json
+              created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 audit_id,
@@ -639,9 +635,6 @@ def cmd_audit_question_similarity(args: argparse.Namespace) -> None:
                 result["audit_result"],
                 json.dumps(summary, ensure_ascii=False),
                 now,
-                now,
-                THRESHOLD_POLICY["revise_required"],
-                json.dumps(summary, ensure_ascii=False),
             ),
         )
         if result.get("matched_chunk_id") or result.get("top_score", 0.0) > 0:
@@ -651,9 +644,9 @@ def cmd_audit_question_similarity(args: argparse.Namespace) -> None:
                 (
                   id, audit_id, matched_source_kind, matched_source_id, matched_chunk_id,
                   matched_question_id, similarity_score, match_reason, snippet,
-                  similarity, match_kind, excerpt_text, metadata_json, created_at
+                  created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     stable_id(
@@ -669,16 +662,6 @@ def cmd_audit_question_similarity(args: argparse.Namespace) -> None:
                     float(result.get("top_score") or 0.0),
                     result["match_reason"],
                     result["snippet"],
-                    float(result.get("top_score") or 0.0),
-                    result["audit_result"],
-                    result["snippet"],
-                    json.dumps(
-                        {
-                            "embed_model": args.embed_model,
-                            "threshold_policy": THRESHOLD_POLICY,
-                        },
-                        ensure_ascii=False,
-                    ),
                     now,
                 ),
             )
@@ -879,8 +862,8 @@ def cmd_review_candidate(args: argparse.Namespace) -> None:
     conn.execute(
         """
         INSERT INTO candidate_reviews
-        (id, candidate_question_id, reviewer, decision, reason_code, notes, review_json, patch_json, reviewed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, candidate_question_id, reviewer, decision, reason_code, notes, review_json, reviewed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             review_id,
@@ -890,7 +873,6 @@ def cmd_review_candidate(args: argparse.Namespace) -> None:
             args.reason_code,
             args.notes,
             json.dumps(review_json, ensure_ascii=False),
-            json.dumps({}, ensure_ascii=False),
             now,
         ),
     )

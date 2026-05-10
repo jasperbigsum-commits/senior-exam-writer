@@ -92,16 +92,16 @@ def test_candidate_reviews_accept_route_decision_values() -> None:
         conn.execute(
             """
             INSERT INTO candidate_questions
-            (id, task_id, planning_unit_id, question_type, prompt_text, draft_json, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, task_id, planning_unit_id, question_type, prompt_json, output_json, verification_json, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("candidate-1", "task-1", "plan-1", "single_choice", "{}", "{}", "pending_review", now, now),
+            ("candidate-1", "task-1", "plan-1", "single_choice", "{}", "{}", "{}", "pending_review", now, now),
         )
         conn.execute(
             """
             INSERT INTO candidate_reviews
-            (id, candidate_question_id, decision, reason_code, notes, review_json, patch_json, reviewed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, candidate_question_id, decision, reason_code, notes, review_json, reviewed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "review-1",
@@ -109,7 +109,6 @@ def test_candidate_reviews_accept_route_decision_values() -> None:
                 "evidence_gap",
                 "evidence_missing",
                 "needs evidence backfill",
-                "{}",
                 "{}",
                 now,
             ),
@@ -164,3 +163,25 @@ def test_init_db_fresh_questions_table_has_task_id_foreign_key() -> None:
         conn.close()
 
     assert any(row[2] == "exam_tasks" and row[3] == "task_id" for row in foreign_keys)
+
+
+def test_fresh_closed_loop_schema_omits_legacy_columns() -> None:
+    conn = sqlite3.connect(":memory:")
+    try:
+        init_db(conn)
+        columns = {
+            table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for table in [
+                "candidate_questions",
+                "candidate_reviews",
+                "question_similarity_audits",
+                "question_similarity_hits",
+            ]
+        }
+    finally:
+        conn.close()
+
+    assert {"prompt_text", "draft_json", "metadata_json"}.isdisjoint(columns["candidate_questions"])
+    assert "patch_json" not in columns["candidate_reviews"]
+    assert {"compared_at", "threshold", "summary_json"}.isdisjoint(columns["question_similarity_audits"])
+    assert {"similarity", "match_kind", "excerpt_text", "metadata_json"}.isdisjoint(columns["question_similarity_hits"])

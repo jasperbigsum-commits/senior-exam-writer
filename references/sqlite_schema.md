@@ -62,22 +62,26 @@ The database is a local evidence store. It is intentionally simple enough to ins
 
 - stores multi-writer candidate prompts and outputs.
 - includes `writer_id`, `round`, `prompt_json`, `output_json`, and `verification_json` for auditability.
+- omits legacy duplicate payload fields; `prompt_json`, `output_json`, and `verification_json` are the single source of truth.
 
 `candidate_reviews`
 
 - stores reviewer routing decisions for candidates.
 - decisions include `approved_candidate`, `revise_candidate`, `replan_required`, `evidence_gap`, and `rejected_candidate`.
+- stores routing data in `review_json`; candidate reviews do not carry a separate patch payload.
 
 `question_similarity_audits`
 
 - stores local embedding duplicate-review audits for candidates or final questions.
 - `candidate_question_id` may be null when the audit targets `question_id`.
 - `blocked_duplicate` and `revise_required` block approval.
+- uses `created_at`, `threshold_policy_json`, and `audit_summary_json` as the canonical audit fields.
 
 `question_similarity_hits`
 
 - stores top historical/prior-question hits for each similarity audit.
 - comparison sources are `historical_exam` and `question_bank`, not factual answer support.
+- uses `similarity_score`, `match_reason`, and `snippet` for hit details.
 
 ## Retrieval Pattern
 

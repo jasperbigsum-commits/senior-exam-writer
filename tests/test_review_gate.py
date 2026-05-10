@@ -37,9 +37,9 @@ def test_candidate_approval_requires_passing_similarity_audit(tmp_path) -> None:
             (
               id, candidate_question_id, question_id, task_id, embed_model, embed_url,
               threshold_policy_json, audit_result, audit_summary_json,
-              created_at, compared_at, threshold, summary_json
+              created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "audit-1",
@@ -52,9 +52,6 @@ def test_candidate_approval_requires_passing_similarity_audit(tmp_path) -> None:
                 "revise_required",
                 "{}",
                 "2026-05-11T00:00:01+08:00",
-                "2026-05-11T00:00:01+08:00",
-                0.93,
-                "{}",
             ),
         )
         conn.commit()
@@ -123,9 +120,9 @@ def test_question_approval_requires_similarity_audit(tmp_path) -> None:
             (
               id, candidate_question_id, question_id, task_id, embed_model, embed_url,
               threshold_policy_json, audit_result, audit_summary_json,
-              created_at, compared_at, threshold, summary_json
+              created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "audit-1",
@@ -138,9 +135,6 @@ def test_question_approval_requires_similarity_audit(tmp_path) -> None:
                 "pass",
                 "{}",
                 "2026-05-11T00:00:01+08:00",
-                "2026-05-11T00:00:01+08:00",
-                0.93,
-                "{}",
             ),
         )
         conn.commit()
@@ -171,26 +165,22 @@ def _seed_candidate_review_fixture(conn) -> None:
         """
         INSERT INTO candidate_questions
         (
-          id, task_id, planning_unit_id, question_type, prompt_text, draft_json,
-          writer_id, round, prompt_json, output_json, verification_json,
-          status, metadata_json, created_at, updated_at
+          id, task_id, planning_unit_id, question_type, writer_id, round,
+          prompt_json, output_json, verification_json, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "candidate-1",
             "task-1",
             "plan-1",
             "single_choice",
-            "{}",
-            "{}",
             "writer-1",
             1,
             "{}",
             '{"items":[{"stem":"example"}]}',
             '{"ok":true}',
             "pending_review",
-            "{}",
             now,
             now,
         ),

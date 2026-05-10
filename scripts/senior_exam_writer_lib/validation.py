@@ -524,7 +524,7 @@ def validate_review_request(
             SELECT audit_result
             FROM question_similarity_audits
             WHERE question_id = ?
-            ORDER BY created_at DESC, compared_at DESC
+            ORDER BY created_at DESC
             LIMIT 1
             """,
             (question_id,),
@@ -574,7 +574,7 @@ def validate_candidate_approval_gate(conn: sqlite3.Connection, candidate_id: str
         SELECT audit_result
         FROM question_similarity_audits
         WHERE candidate_question_id = ?
-        ORDER BY created_at DESC, compared_at DESC
+        ORDER BY created_at DESC
         LIMIT 1
         """,
         (candidate_id,),

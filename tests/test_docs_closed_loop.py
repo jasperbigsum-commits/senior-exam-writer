@@ -24,3 +24,8 @@ def test_skill_docs_mention_closed_loop_commands() -> None:
         "review-candidate",
     ]:
         assert token in joined
+
+
+def test_runtime_setup_has_single_cli_entrypoint() -> None:
+    root = Path(__file__).resolve().parents[1]
+    assert not (root / "scripts" / "init_local_runtime.py").exists()

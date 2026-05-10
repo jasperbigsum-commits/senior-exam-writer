@@ -39,10 +39,8 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
 
 def candidate_text(row: sqlite3.Row) -> str:
     output = _json_object(row["output_json"] if "output_json" in row.keys() else None)
-    draft = _json_object(row["draft_json"] if "draft_json" in row.keys() else None)
     parts: list[str] = []
-    for data in [output, draft]:
-        parts.extend(_question_texts(data))
+    parts.extend(_question_texts(output))
     return "\n".join(part.strip() for part in parts if part and part.strip())
 
 

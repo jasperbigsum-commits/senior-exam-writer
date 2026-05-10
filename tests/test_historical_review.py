@@ -55,35 +55,7 @@ def test_audit_candidate_batch_fails_when_embedding_count_mismatches(tmp_path) -
     try:
         init_db(conn)
         _seed_similarity_fixture(conn)
-        conn.execute(
-            """
-            INSERT INTO candidate_questions
-            (
-              id, task_id, planning_unit_id, question_type, prompt_text, draft_json,
-              writer_id, round, prompt_json, output_json, verification_json,
-              status, metadata_json, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "candidate-2",
-                "task-1",
-                "plan-1",
-                "single_choice",
-                "{}",
-                "{}",
-                "writer-2",
-                1,
-                "{}",
-                '{"items":[{"stem":"另一个题干"}]}',
-                '{"ok":true}',
-                "pending_review",
-                "{}",
-                "2026-05-11T00:00:00+08:00",
-                "2026-05-11T00:00:00+08:00",
-            ),
-        )
-        conn.commit()
+        _insert_candidate(conn, "candidate-2", "another question stem")
         rows = conn.execute("SELECT * FROM candidate_questions ORDER BY id").fetchall()
         with pytest.raises(ValueError, match="embedding vector count mismatch"):
             audit_candidate_batch(
@@ -103,7 +75,7 @@ def test_audit_candidate_batch_requires_generated_question_text(tmp_path) -> Non
     try:
         init_db(conn)
         _seed_similarity_fixture(conn)
-        conn.execute("UPDATE candidate_questions SET output_json = ?, draft_json = ?", ('{"status":"pending"}', "{}"))
+        conn.execute("UPDATE candidate_questions SET output_json = ?", ('{"status":"pending"}',))
         conn.commit()
         rows = conn.execute("SELECT * FROM candidate_questions ORDER BY id").fetchall()
         with pytest.raises(ValueError, match="candidate output text is required"):
@@ -128,10 +100,6 @@ def test_cli_audit_question_similarity_persists_audit_rows(monkeypatch, tmp_path
         conn.close()
 
     monkeypatch.setattr(
-        "senior_exam_writer_lib.historical_review.llama_embed",
-        lambda texts, _url, _model: [[1.0, 0.0] for _text in texts],
-    )
-    monkeypatch.setattr(
         "senior_exam_writer_lib.cli.audit_candidate_batch",
         lambda conn, rows, embed_url, embed_model: __import__(
             "senior_exam_writer_lib.historical_review",
@@ -149,6 +117,7 @@ def test_cli_audit_question_similarity_persists_audit_rows(monkeypatch, tmp_path
         argparse.Namespace(
             db=str(db_path),
             planning_unit_id="plan-1",
+            question_id=None,
             task_id="task-1",
             embed_url="http://127.0.0.1:8081",
             embed_model="local-embedding",
@@ -202,12 +171,12 @@ def test_cli_audit_question_similarity_can_audit_final_question(monkeypatch, tmp
             """,
             (
                 "question-1",
-                "共同富裕",
+                "common prosperity",
                 "single_choice",
                 "task-1",
                 "{}",
                 "{}",
-                '{"status":"ok","items":[{"stem":"共同富裕历史真题题干"}]}',
+                '{"status":"ok","items":[{"stem":"historical question stem"}]}',
                 '{"ok":true}',
                 "ok",
                 "2026-05-11T00:00:00+08:00",
@@ -266,18 +235,7 @@ def _seed_similarity_fixture(conn) -> None:
         (id, name, outline_json, source_policy_json, question_rules_json, requirements_json, coverage_json, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (
-            "task-1",
-            "Task 1",
-            "{}",
-            "{}",
-            "{}",
-            "{}",
-            "{}",
-            "active",
-            now,
-            now,
-        ),
+        ("task-1", "Task 1", "{}", "{}", "{}", "{}", "{}", "active", now, now),
     )
     conn.execute(
         """
@@ -309,37 +267,38 @@ def _seed_similarity_fixture(conn) -> None:
             None,
             None,
             None,
-            "共同富裕历史真题题干",
+            "historical question stem",
             0,
             "[1.0, 0.0]",
             "{}",
             now,
         ),
     )
+    _insert_candidate(conn, "candidate-1", "historical question stem")
+
+
+def _insert_candidate(conn, candidate_id: str, stem: str) -> None:
+    now = "2026-05-11T00:00:00+08:00"
     conn.execute(
         """
         INSERT INTO candidate_questions
         (
-          id, task_id, planning_unit_id, question_type, prompt_text, draft_json,
-          writer_id, round, prompt_json, output_json, verification_json,
-          status, metadata_json, created_at, updated_at
+          id, task_id, planning_unit_id, question_type, writer_id, round,
+          prompt_json, output_json, verification_json, status, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            "candidate-1",
+            candidate_id,
             "task-1",
             "plan-1",
             "single_choice",
-            "{}",
-            "{}",
             "writer-1",
             1,
             "{}",
-            '{"items":[{"stem":"共同富裕历史真题题干"}]}',
+            json.dumps({"items": [{"stem": stem}]}),
             '{"ok":true}',
             "pending_review",
-            "{}",
             now,
             now,
         ),
