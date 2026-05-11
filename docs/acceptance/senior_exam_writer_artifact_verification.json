@@ -1,0 +1,110 @@
+{
+  "generated_at": "2026-05-11 19:21:55 Asia/Shanghai",
+  "overall": "PASS",
+  "package": {
+    "docx": "C:\\Users\\coxx\\Downloads\\senior_exam_writer_actual_question_package.docx",
+    "docx_exists": true,
+    "docx_size": 45656,
+    "json": "C:\\Users\\coxx\\Downloads\\senior_exam_writer_actual_question_package.json",
+    "json_exists": true,
+    "json_size": 20203,
+    "status": "ok",
+    "item_count": 9,
+    "evidence_count": 6,
+    "review_summary": {
+      "item_count": 9,
+      "scenario_count": 3,
+      "has_answers": true,
+      "has_analysis": true,
+      "has_difficulty": true,
+      "has_citations": true,
+      "has_scoring_or_solution_for_non_choice": true,
+      "review_status": "accepted_for_mock_acceptance"
+    }
+  },
+  "cases": [
+    {
+      "case": "scenario1_civil_service",
+      "materials_count": 3,
+      "original_sources_count": 3,
+      "prepared_missing": [],
+      "stage_count": 8,
+      "writer_count": 3,
+      "manifest_count": 3,
+      "manifest_archived_count": 3,
+      "rag_db": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario1_civil_service\\local_rag.sqlite",
+      "rag_db_exists": true,
+      "rag_db_size": 4423680,
+      "sqlite_vec_loaded": true,
+      "rag_counts": {
+        "rag_sources": 3,
+        "rag_chunks": 3,
+        "rag_chunks_fts": 3,
+        "rag_vec": 3,
+        "rag_knowledge_points": 3,
+        "rag_knowledge_hits": 9
+      },
+      "knowledge_points": [
+        "找规律",
+        "数量关系",
+        "时事政治"
+      ]
+    },
+    {
+      "case": "scenario2_university_pdf",
+      "materials_count": 1,
+      "original_sources_count": 1,
+      "prepared_missing": [],
+      "stage_count": 8,
+      "writer_count": 3,
+      "manifest_count": 1,
+      "manifest_archived_count": 1,
+      "rag_db": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario2_university_pdf\\local_rag.sqlite",
+      "rag_db_exists": true,
+      "rag_db_size": 4362240,
+      "sqlite_vec_loaded": true,
+      "rag_counts": {
+        "rag_sources": 1,
+        "rag_chunks": 1,
+        "rag_chunks_fts": 1,
+        "rag_vec": 1,
+        "rag_knowledge_points": 3,
+        "rag_knowledge_hits": 3
+      },
+      "knowledge_points": [
+        "Correlation coefficient",
+        "Sample variance",
+        "n-1"
+      ]
+    },
+    {
+      "case": "scenario3_ai_hiring",
+      "materials_count": 2,
+      "original_sources_count": 2,
+      "prepared_missing": [],
+      "stage_count": 8,
+      "writer_count": 3,
+      "manifest_count": 2,
+      "manifest_archived_count": 2,
+      "rag_db": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario3_ai_hiring\\local_rag.sqlite",
+      "rag_db_exists": true,
+      "rag_db_size": 4399104,
+      "sqlite_vec_loaded": true,
+      "rag_counts": {
+        "rag_sources": 2,
+        "rag_chunks": 2,
+        "rag_chunks_fts": 2,
+        "rag_vec": 2,
+        "rag_knowledge_points": 4,
+        "rag_knowledge_hits": 8
+      },
+      "knowledge_points": [
+        "LLM 基础",
+        "Python",
+        "机器学习",
+        "系统设计追问"
+      ]
+    }
+  ],
+  "gaps": []
+}

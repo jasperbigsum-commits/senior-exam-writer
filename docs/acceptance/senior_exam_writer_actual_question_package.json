@@ -1,0 +1,544 @@
+{
+  "status": "ok",
+  "package_name": "循证出题官三场景小样本题包",
+  "generated_at": "2026-05-11 19:11:14 Asia/Shanghai",
+  "scope_note": "基于本地小型模拟资料生成，用于验收 skill 的实际流与题包产物完整性；不是正式考试真题或真实最新资料包。",
+  "evidence": [
+    {
+      "id": "E1",
+      "role": "specification",
+      "title": "2026 国家公务员考试公共科目大纲 模拟版",
+      "source": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario1_civil_service\\materials\\official_syllabus_mock.md",
+      "locator": "official_syllabus_mock.md / chunk:1",
+      "snippet": "行政职业能力测验包含常识判断、数量关系、判断推理、资料分析。数量关系重点考查基本运算、比例、工程问题和资料数量推理。判断推理中的找规律题考查图形、数列和位置变化规律。"
+    },
+    {
+      "id": "E2",
+      "role": "background_current_affairs",
+      "title": "时事政治资料 模拟版",
+      "source": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario1_civil_service\\materials\\current_affairs_mock.md",
+      "locator": "current_affairs_mock.md / chunk:1 / 2026 年资料",
+      "snippet": "2026 年政府工作强调高质量发展、科技创新、民生保障和绿色转型。时政题应标注资料日期和来源，不得凭记忆编造政策原文。"
+    },
+    {
+      "id": "E3",
+      "role": "prior_style",
+      "title": "历届题模拟库",
+      "source": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario1_civil_service\\materials\\historical_exam_mock.md",
+      "locator": "historical_exam_mock.md / chunk:1",
+      "snippet": "例题：某工程队按比例完成任务。例题：观察数列 2,4,8 的变化。"
+    },
+    {
+      "id": "E4",
+      "role": "core_course_evidence",
+      "title": "Economic Statistics Chapter Mock",
+      "source": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario2_university_pdf\\materials\\economic_statistics_chapter.md",
+      "locator": "economic_statistics_chapter.md / chunk:1",
+      "snippet": "Sample variance uses n-1 denominator to reduce bias from sample mean estimation. Correlation coefficient measures linear relationship strength between two variables. Calculation questions should show formula, substitution, steps, and final answer. Short answers should include scoring points and definitions."
+    },
+    {
+      "id": "E5",
+      "role": "core_job_evidence",
+      "title": "AI 工程师 JD 模拟",
+      "source": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario3_ai_hiring\\materials\\ai_engineer_jd.md",
+      "locator": "ai_engineer_jd.md / chunk:1",
+      "snippet": "岗位要求掌握机器学习、深度学习、Python、工程实践和 LLM 基础。候选人需要理解模型评估、数据处理、服务部署、提示工程和 RAG 基础。"
+    },
+    {
+      "id": "E6",
+      "role": "core_job_evidence",
+      "title": "能力模型 模拟",
+      "source": "C:\\Users\\coxx\\AppData\\Local\\Temp\\senior_exam_cases_w64uszm8\\scenario3_ai_hiring\\materials\\competency_model.md",
+      "locator": "competency_model.md / chunk:1",
+      "snippet": "基础笔试覆盖概念理解、代码阅读、调试和系统权衡。面试题应包含基础追问、项目追问、系统设计追问，并给出优秀、可接受和风险回答信号。"
+    }
+  ],
+  "items": [
+    {
+      "id": "GKY-001",
+      "scenario": "国家公务员考试模拟题包",
+      "question_type": "single_choice",
+      "difficulty": "easy",
+      "knowledge_points": [
+        "时事政治"
+      ],
+      "coverage_target": "常识判断 / 时事政治 / 2026 年资料要点识别",
+      "stem": "根据资料，2026 年政府工作强调的内容不包括下列哪一项？",
+      "options": [
+        {
+          "label": "A",
+          "text": "高质量发展"
+        },
+        {
+          "label": "B",
+          "text": "科技创新"
+        },
+        {
+          "label": "C",
+          "text": "民生保障"
+        },
+        {
+          "label": "D",
+          "text": "取消绿色转型"
+        }
+      ],
+      "answer": "D",
+      "analysis": "资料列明的重点是高质量发展、科技创新、民生保障和绿色转型，未支持“取消绿色转型”。",
+      "citations": [
+        "E2"
+      ],
+      "assertions": [
+        {
+          "claim": "资料列出四项政府工作重点：高质量发展、科技创新、民生保障、绿色转型。",
+          "citations": [
+            "E2"
+          ]
+        }
+      ],
+      "difficulty_rationale": "直接识别资料中的明确表述，属于单证据、识记型 easy 题。",
+      "dedup_check": {
+        "within_batch": "本题考查时政资料要点识别，不与数量关系或找规律题重复。"
+      }
+    },
+    {
+      "id": "GKY-002",
+      "scenario": "国家公务员考试模拟题包",
+      "question_type": "single_choice",
+      "difficulty": "medium",
+      "knowledge_points": [
+        "数量关系",
+        "比例"
+      ],
+      "coverage_target": "行政职业能力测验 / 数量关系 / 比例与工程问题",
+      "stem": "甲、乙两个工程队合作完成一项任务。甲单独完成需要 12 天，乙单独完成需要 18 天。若两队合作，完成全部任务需要多少天？",
+      "options": [
+        {
+          "label": "A",
+          "text": "6 天"
+        },
+        {
+          "label": "B",
+          "text": "7.2 天"
+        },
+        {
+          "label": "C",
+          "text": "8 天"
+        },
+        {
+          "label": "D",
+          "text": "10 天"
+        }
+      ],
+      "answer": "B",
+      "analysis": "甲效率为 1/12，乙效率为 1/18，合效率为 1/12+1/18=5/36，因此合作时间为 36/5=7.2 天。大纲模拟资料说明数量关系重点考查基本运算、比例和工程问题，历届题模拟库也给出工程队按比例完成任务的风格提示。",
+      "citations": [
+        "E1",
+        "E3"
+      ],
+      "assertions": [
+        {
+          "claim": "数量关系覆盖基本运算、比例和工程问题。",
+          "citations": [
+            "E1"
+          ]
+        }
+      ],
+      "difficulty_rationale": "需要把工程问题转化为效率相加，包含一步分数运算，属于 medium。",
+      "dedup_check": {
+        "within_batch": "本题考查工程效率，不重复数列找规律或时政要点。"
+      }
+    },
+    {
+      "id": "GKY-003",
+      "scenario": "国家公务员考试模拟题包",
+      "question_type": "single_choice",
+      "difficulty": "hard",
+      "knowledge_points": [
+        "找规律",
+        "数列规律"
+      ],
+      "coverage_target": "行政职业能力测验 / 判断推理 / 找规律题",
+      "stem": "观察数列：2，4，8，16，32，下一项最可能是？",
+      "options": [
+        {
+          "label": "A",
+          "text": "48"
+        },
+        {
+          "label": "B",
+          "text": "56"
+        },
+        {
+          "label": "C",
+          "text": "64"
+        },
+        {
+          "label": "D",
+          "text": "72"
+        }
+      ],
+      "answer": "C",
+      "analysis": "每一项均为前一项乘以 2，因此 32 的下一项为 64。大纲模拟资料说明找规律题考查图形、数列和位置变化规律，历届题模拟库给出 2,4,8 的数列风格提示。",
+      "citations": [
+        "E1",
+        "E3"
+      ],
+      "assertions": [
+        {
+          "claim": "找规律题可考查数列规律。",
+          "citations": [
+            "E1",
+            "E3"
+          ]
+        }
+      ],
+      "difficulty_rationale": "本题在小样本中作为 hard 代表题，强调从已给序列抽象乘法规律；真实验收时应替换为更复杂多规则数列。",
+      "dedup_check": {
+        "within_batch": "本题只考查数列规律，不重复工程效率或时政资料判断。"
+      }
+    },
+    {
+      "id": "EST-001",
+      "scenario": "大学期末考试题包",
+      "question_type": "calculation",
+      "difficulty": "easy",
+      "knowledge_points": [
+        "Sample variance",
+        "n-1"
+      ],
+      "coverage_target": "经济统计学 / 样本方差 / n-1 分母",
+      "stem": "某样本数据为 2、4、6。按课程资料要求，样本方差采用 n-1 作分母。请计算样本方差，并写出代入步骤。",
+      "answer": "样本均值为 4；离差平方和为 (2-4)^2+(4-4)^2+(6-4)^2=8；样本方差 s^2=8/(3-1)=4。",
+      "solution_steps": [
+        {
+          "step": "计算均值：x̄=(2+4+6)/3=4。",
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "step": "计算离差平方和：4+0+4=8。",
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "step": "按样本方差使用 n-1 分母：8/(3-1)=4。",
+          "citations": [
+            "E4"
+          ]
+        }
+      ],
+      "analysis": "资料明确样本方差使用 n-1 分母，并要求计算题展示公式、代入、步骤和最终答案。",
+      "citations": [
+        "E4"
+      ],
+      "assertions": [
+        {
+          "claim": "样本方差采用 n-1 分母。",
+          "citations": [
+            "E4"
+          ]
+        }
+      ],
+      "difficulty_rationale": "数据少、步骤直接，重点考查 n-1 分母，属于 easy。",
+      "dedup_check": {
+        "within_batch": "本题考查样本方差计算，不重复相关系数解释题。"
+      }
+    },
+    {
+      "id": "EST-002",
+      "scenario": "大学期末考试题包",
+      "question_type": "short_answer",
+      "difficulty": "medium",
+      "knowledge_points": [
+        "Correlation coefficient"
+      ],
+      "coverage_target": "经济统计学 / 相关系数 / 概念解释",
+      "stem": "简答：什么是相关系数？它主要用于说明变量之间的哪类关系强度？作答需包含评分点。",
+      "answer": "相关系数用于衡量两个变量之间线性关系的强弱。答题时应说明“两个变量”“线性关系”“强度衡量”三个要点。",
+      "scoring_points": [
+        {
+          "point": "指出对象是两个变量。",
+          "score": 2,
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "point": "指出关系类型是线性关系。",
+          "score": 3,
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "point": "指出作用是衡量关系强度。",
+          "score": 3,
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "point": "表达清晰、无与资料冲突的扩展。",
+          "score": 2,
+          "citations": [
+            "E4"
+          ]
+        }
+      ],
+      "analysis": "资料说明 correlation coefficient measures linear relationship strength between two variables；短答题还应包含评分点和定义。",
+      "citations": [
+        "E4"
+      ],
+      "assertions": [
+        {
+          "claim": "相关系数衡量两个变量之间线性关系的强度。",
+          "citations": [
+            "E4"
+          ]
+        }
+      ],
+      "difficulty_rationale": "需要完整表达对象、关系类型和衡量作用，属于 medium。",
+      "dedup_check": {
+        "within_batch": "本题考查概念定义，不重复样本方差计算。"
+      }
+    },
+    {
+      "id": "EST-003",
+      "scenario": "大学期末考试题包",
+      "question_type": "calculation",
+      "difficulty": "hard",
+      "knowledge_points": [
+        "Sample variance",
+        "complete solution steps"
+      ],
+      "coverage_target": "经济统计学 / 样本方差 / 完整步骤表达",
+      "stem": "某样本数据为 3、5、7、9。按课程资料要求，样本方差采用 n-1 作分母。请计算样本方差，并说明为什么作答中不能只写最终答案。",
+      "answer": "均值为 6；离差平方和为 (3-6)^2+(5-6)^2+(7-6)^2+(9-6)^2=20；样本方差 s^2=20/(4-1)=20/3≈6.67。不能只写最终答案，因为资料要求计算题展示公式、代入、步骤和最终答案。",
+      "solution_steps": [
+        {
+          "step": "计算均值：x̄=(3+5+7+9)/4=6。",
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "step": "计算离差平方和：9+1+1+9=20。",
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "step": "按 n-1 分母计算：20/(4-1)=20/3≈6.67。",
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "step": "说明答题规范：应展示公式、代入、步骤和最终答案。",
+          "citations": [
+            "E4"
+          ]
+        }
+      ],
+      "analysis": "本题同时考查样本方差计算与计算题作答规范，必须把分母 n-1 和步骤展示写清楚。",
+      "citations": [
+        "E4"
+      ],
+      "assertions": [
+        {
+          "claim": "样本方差使用 n-1 分母。",
+          "citations": [
+            "E4"
+          ]
+        },
+        {
+          "claim": "计算题应展示公式、代入、步骤和最终答案。",
+          "citations": [
+            "E4"
+          ]
+        }
+      ],
+      "difficulty_rationale": "比 easy 题多一步规范解释，且样本量更大，属于 hard。",
+      "dedup_check": {
+        "within_batch": "本题考查计算规范与多数据计算，不重复概念短答。"
+      }
+    },
+    {
+      "id": "AIH-001",
+      "scenario": "AI 工程师招聘题包",
+      "question_type": "single_choice",
+      "difficulty": "easy",
+      "knowledge_points": [
+        "AI 工程师能力域"
+      ],
+      "coverage_target": "AI 工程师基础笔试 / JD 能力要求识别",
+      "stem": "根据岗位资料，下列哪一项属于 AI 工程师岗位要求掌握的内容？",
+      "options": [
+        {
+          "label": "A",
+          "text": "机器学习"
+        },
+        {
+          "label": "B",
+          "text": "古典文献校勘"
+        },
+        {
+          "label": "C",
+          "text": "建筑结构制图"
+        },
+        {
+          "label": "D",
+          "text": "园林植物栽培"
+        }
+      ],
+      "answer": "A",
+      "analysis": "岗位资料明确要求掌握机器学习、深度学习、Python、工程实践和 LLM 基础。其他选项未被资料支持。",
+      "citations": [
+        "E5"
+      ],
+      "assertions": [
+        {
+          "claim": "AI 工程师岗位要求包括机器学习。",
+          "citations": [
+            "E5"
+          ]
+        }
+      ],
+      "difficulty_rationale": "直接识别 JD 明示能力域，属于 easy。",
+      "dedup_check": {
+        "within_batch": "本题考查 JD 能力域识别，不重复面试追问设计。"
+      }
+    },
+    {
+      "id": "AIH-002",
+      "scenario": "AI 工程师招聘题包",
+      "question_type": "short_answer",
+      "difficulty": "medium",
+      "knowledge_points": [
+        "RAG 基础",
+        "提示工程"
+      ],
+      "coverage_target": "AI 工程师基础笔试 / LLM 基础与 RAG",
+      "stem": "简答：结合岗位资料，为什么 AI 工程师基础笔试可以覆盖提示工程和 RAG 基础？请给出两个评分点。",
+      "answer": "岗位资料要求候选人理解提示工程和 RAG 基础，因此基础笔试可围绕这些能力设计概念理解或应用判断题。",
+      "scoring_points": [
+        {
+          "point": "指出岗位资料明确包含提示工程。",
+          "score": 4,
+          "citations": [
+            "E5"
+          ]
+        },
+        {
+          "point": "指出岗位资料明确包含 RAG 基础。",
+          "score": 4,
+          "citations": [
+            "E5"
+          ]
+        },
+        {
+          "point": "能把考查形式限定为基础笔试中的概念理解或应用判断。",
+          "score": 2,
+          "citations": [
+            "E6"
+          ]
+        }
+      ],
+      "analysis": "JD 资料列出提示工程和 RAG 基础，能力模型说明基础笔试覆盖概念理解、代码阅读、调试和系统权衡。",
+      "citations": [
+        "E5",
+        "E6"
+      ],
+      "assertions": [
+        {
+          "claim": "岗位要求理解提示工程和 RAG 基础。",
+          "citations": [
+            "E5"
+          ]
+        },
+        {
+          "claim": "基础笔试可覆盖概念理解。",
+          "citations": [
+            "E6"
+          ]
+        }
+      ],
+      "difficulty_rationale": "需要合并 JD 与能力模型两条证据，属于 medium。",
+      "dedup_check": {
+        "within_batch": "本题考查笔试覆盖理由，不重复单项能力识别。"
+      }
+    },
+    {
+      "id": "AIH-003",
+      "scenario": "AI 工程师招聘题包",
+      "question_type": "interview",
+      "difficulty": "hard",
+      "knowledge_points": [
+        "系统设计追问",
+        "面试评价信号"
+      ],
+      "coverage_target": "AI 工程师面试 / 系统设计追问与回答信号",
+      "stem": "面试题：请候选人说明一个面向检索增强问答的服务部署方案。追问应覆盖系统设计权衡，并给出优秀、可接受和风险回答信号。",
+      "answer": "参考追问：1. 如何组织数据处理、检索与生成链路？2. 如何评估模型或系统效果？3. 如何处理服务部署中的延迟、稳定性和调试问题？优秀回答能清晰说明数据处理、RAG 基础、模型评估、服务部署和系统权衡；可接受回答能覆盖主要链路但细节不足；风险回答只停留在概念名词，无法说明部署或评估。",
+      "scoring_points": [
+        {
+          "point": "覆盖数据处理、服务部署、模型评估或 RAG 基础中的至少三项。",
+          "score": 4,
+          "citations": [
+            "E5"
+          ]
+        },
+        {
+          "point": "能进行系统权衡，例如延迟、稳定性、调试或工程实践。",
+          "score": 3,
+          "citations": [
+            "E5",
+            "E6"
+          ]
+        },
+        {
+          "point": "追问区分优秀、可接受和风险回答信号。",
+          "score": 3,
+          "citations": [
+            "E6"
+          ]
+        }
+      ],
+      "analysis": "JD 要求候选人理解模型评估、数据处理、服务部署、提示工程和 RAG 基础；能力模型要求面试包含系统设计追问，并给出不同回答信号。",
+      "citations": [
+        "E5",
+        "E6"
+      ],
+      "assertions": [
+        {
+          "claim": "岗位资料要求理解模型评估、数据处理、服务部署和 RAG 基础。",
+          "citations": [
+            "E5"
+          ]
+        },
+        {
+          "claim": "面试题应包含系统设计追问，并给出优秀、可接受和风险回答信号。",
+          "citations": [
+            "E6"
+          ]
+        }
+      ],
+      "difficulty_rationale": "需要把岗位能力、系统设计权衡和面试评分信号整合成结构化追问，属于 hard。",
+      "dedup_check": {
+        "within_batch": "本题考查面试追问与评价信号，不重复基础笔试题。"
+      }
+    }
+  ],
+  "review_summary": {
+    "item_count": 9,
+    "scenario_count": 3,
+    "has_answers": true,
+    "has_analysis": true,
+    "has_difficulty": true,
+    "has_citations": true,
+    "has_scoring_or_solution_for_non_choice": true,
+    "review_status": "accepted_for_mock_acceptance"
+  }
+}
