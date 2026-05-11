@@ -9,6 +9,7 @@ For this skill's local source-file RAG, use `scripts/llamaindex_sqlite_vec_rag.p
 - LlamaIndex loads files and splits text into nodes/chunks.
 - A local llama.cpp embedding endpoint creates vectors with the same Chinese-friendly embedding model used by the evidence workflow.
 - `sqlite-vec` stores vectors in a local SQLite `vec0` table.
+- `rag_knowledge_points` and `rag_knowledge_hits` persist knowledge-point to source-chunk bindings after query.
 - FTS5 is only the lexical side of hybrid recall and source locator matching; it is never an FTS-only evidence path.
 - If LlamaIndex, `sqlite-vec`, embedding, vector dimension, or index creation fails, stop and fix the environment instead of continuing with context-only, keyword-only, or remote-default retrieval.
 
@@ -54,9 +55,20 @@ uv run --extra rag python scripts/llamaindex_sqlite_vec_rag.py query `
   --embed-model local-embedding
 ```
 
-The query output must include `source_path`, `source_name`, `source_id`, `chunk_id`, `node_id`, `chunk_index`, `locator`, `char_start`, `char_end`, `retrieval_modes`, `lexical_terms`, `snippet`, `hit_text`, and `knowledge_judgement`.
+The query output must include `source_path`, `source_name`, `source_id`, `chunk_id`, `node_id`, `chunk_index`, `locator`, `char_start`, `char_end`, `retrieval_modes`, `lexical_terms`, `snippet`, `hit_text`, `knowledge_judgement`, `knowledge_hit_ids`, and `persisted_knowledge_hits`.
 
 Use `knowledge_judgement` to decide whether the hit really supports the requested knowledge point. Use `retrieval_modes` to audit whether a hit came from vector retrieval, FTS5 lexical recall, or both.
+
+After query, inspect persisted knowledge bindings when auditing a run:
+
+```sql
+SELECT p.knowledge_point, h.status, h.semantic_score, h.lexical_match,
+       c.source_path, c.locator, h.matched_text
+FROM rag_knowledge_hits h
+JOIN rag_knowledge_points p ON p.id = h.knowledge_point_id
+JOIN rag_chunks c ON c.id = h.chunk_id
+ORDER BY p.knowledge_point, h.updated_at DESC;
+```
 
 ## Three-Platform Environment Notes
 
@@ -152,4 +164,3 @@ Refuse or stop when:
 - Retrieved hits lack stable source paths, chunk IDs, or locators.
 - CLI/MCP retrieval creates vectors with a different embedding model from the local evidence store.
 - The task contains confidential exam materials and the external provider or MCP service is not approved.
-

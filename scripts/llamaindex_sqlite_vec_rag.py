@@ -34,6 +34,7 @@ class RagNode:
 def connect_rag_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
     try:
@@ -83,6 +84,33 @@ def init_rag_schema(conn: sqlite3.Connection) -> None:
           created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS rag_knowledge_points (
+          id TEXT PRIMARY KEY,
+          knowledge_point TEXT NOT NULL UNIQUE,
+          normalized_text TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS rag_knowledge_hits (
+          id TEXT PRIMARY KEY,
+          knowledge_point_id TEXT NOT NULL REFERENCES rag_knowledge_points(id) ON DELETE CASCADE,
+          knowledge_point TEXT NOT NULL,
+          query TEXT NOT NULL,
+          chunk_id TEXT NOT NULL REFERENCES rag_chunks(id) ON DELETE CASCADE,
+          source_id TEXT NOT NULL REFERENCES rag_sources(id) ON DELETE CASCADE,
+          status TEXT NOT NULL,
+          lexical_match INTEGER NOT NULL,
+          semantic_score REAL NOT NULL,
+          matched_text TEXT NOT NULL,
+          retrieval_modes_json TEXT NOT NULL DEFAULT '[]',
+          lexical_terms_json TEXT NOT NULL DEFAULT '[]',
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(query, knowledge_point, chunk_id)
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(
           chunk_id UNINDEXED,
           source_id UNINDEXED,
@@ -94,6 +122,10 @@ def init_rag_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(source_id);
         CREATE INDEX IF NOT EXISTS idx_rag_chunks_id ON rag_chunks(id);
+        CREATE INDEX IF NOT EXISTS idx_rag_knowledge_points_text ON rag_knowledge_points(normalized_text);
+        CREATE INDEX IF NOT EXISTS idx_rag_knowledge_hits_point ON rag_knowledge_hits(knowledge_point);
+        CREATE INDEX IF NOT EXISTS idx_rag_knowledge_hits_chunk ON rag_knowledge_hits(chunk_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_knowledge_hits_status ON rag_knowledge_hits(status);
         """
     )
     conn.commit()
@@ -120,6 +152,8 @@ def reset_rag_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         DROP TABLE IF EXISTS rag_vec;
+        DROP TABLE IF EXISTS rag_knowledge_hits;
+        DROP TABLE IF EXISTS rag_knowledge_points;
         DROP TABLE IF EXISTS rag_chunks_fts;
         DROP TABLE IF EXISTS rag_chunks;
         DROP TABLE IF EXISTS rag_sources;
@@ -313,6 +347,7 @@ def query_index(
         fts_rows = _fts_search(conn, query, fts_k, knowledge_points=knowledge_points)
         combined = _combine_rows(vector_rows, fts_rows)
         hits = []
+        persisted_hit_count = 0
         for rank, candidate in enumerate(combined[:top_k], 1):
             row = _chunk_by_rowid(conn, candidate["rowid"])
             if not row:
@@ -328,6 +363,17 @@ def query_index(
                 weak_threshold=weak_threshold,
                 max_chars=max_chars,
             )
+            knowledge_hit_ids = _persist_knowledge_hits(
+                conn,
+                query=query,
+                chunk=row,
+                judgements=judgements,
+                retrieval_modes=candidate["modes"],
+                lexical_terms=candidate.get("lexical_terms", []),
+                vector_distance=candidate.get("vector_distance"),
+                fts_rank=candidate.get("fts_rank"),
+            )
+            persisted_hit_count += len(knowledge_hit_ids)
             hits.append(
                 {
                     "rank": rank,
@@ -348,13 +394,16 @@ def query_index(
                     "snippet": snippet,
                     "hit_text": row["text"][:max_chars],
                     "knowledge_judgement": judgements,
+                    "knowledge_hit_ids": knowledge_hit_ids,
                 }
             )
+        conn.commit()
         return {
             "ok": True,
             "query": query,
             "backend": "llamaindex+sqlite-vec+fts5",
             "top_k": top_k,
+            "persisted_knowledge_hits": persisted_hit_count,
             "hits": hits,
         }
     finally:
@@ -393,7 +442,11 @@ def _ensure_query_ready(conn: sqlite3.Connection) -> None:
 
 
 def _delete_source(conn: sqlite3.Connection, source_id: str) -> None:
-    rowids = [int(row["rowid"]) for row in conn.execute("SELECT rowid FROM rag_chunks WHERE source_id = ?", (source_id,))]
+    rows = conn.execute("SELECT rowid, id FROM rag_chunks WHERE source_id = ?", (source_id,)).fetchall()
+    rowids = [int(row["rowid"]) for row in rows]
+    chunk_ids = [str(row["id"]) for row in rows]
+    for chunk_id in chunk_ids:
+        conn.execute("DELETE FROM rag_knowledge_hits WHERE chunk_id = ?", (chunk_id,))
     for rowid in rowids:
         conn.execute("DELETE FROM rag_chunks_fts WHERE rowid = ?", (rowid,))
         conn.execute("DELETE FROM rag_vec WHERE rowid = ?", (rowid,))
@@ -614,6 +667,93 @@ def _knowledge_judgements(
             }
         )
     return results
+
+
+def _persist_knowledge_hits(
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    chunk: sqlite3.Row,
+    judgements: list[dict[str, Any]],
+    retrieval_modes: list[str],
+    lexical_terms: list[str],
+    vector_distance: float | None,
+    fts_rank: float | None,
+) -> list[str]:
+    now = now_iso()
+    hit_ids: list[str] = []
+    for judgement in judgements:
+        point = str(judgement.get("knowledge_point") or "").strip()
+        if not point:
+            continue
+        normalized = _normalize_knowledge_point(point)
+        point_id = stable_id("rag_knowledge_point", normalized)
+        hit_id = stable_id("rag_knowledge_hit", query, normalized, str(chunk["id"]))
+        conn.execute(
+            """
+            INSERT INTO rag_knowledge_points(id, knowledge_point, normalized_text, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(knowledge_point) DO UPDATE SET
+              normalized_text = excluded.normalized_text,
+              updated_at = excluded.updated_at
+            """,
+            (point_id, point, normalized, now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO rag_knowledge_hits
+            (
+              id, knowledge_point_id, knowledge_point, query, chunk_id, source_id,
+              status, lexical_match, semantic_score, matched_text,
+              retrieval_modes_json, lexical_terms_json, metadata_json, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(query, knowledge_point, chunk_id) DO UPDATE SET
+              knowledge_point_id = excluded.knowledge_point_id,
+              source_id = excluded.source_id,
+              status = excluded.status,
+              lexical_match = excluded.lexical_match,
+              semantic_score = excluded.semantic_score,
+              matched_text = excluded.matched_text,
+              retrieval_modes_json = excluded.retrieval_modes_json,
+              lexical_terms_json = excluded.lexical_terms_json,
+              metadata_json = excluded.metadata_json,
+              updated_at = excluded.updated_at
+            """,
+            (
+                hit_id,
+                point_id,
+                point,
+                query,
+                str(chunk["id"]),
+                str(chunk["source_id"]),
+                str(judgement.get("status") or "missing"),
+                1 if judgement.get("lexical_match") else 0,
+                float(judgement.get("semantic_score") or 0.0),
+                str(judgement.get("matched_text") or ""),
+                json.dumps(retrieval_modes, ensure_ascii=False),
+                json.dumps(lexical_terms, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "vector_distance": vector_distance,
+                        "fts_rank": fts_rank,
+                        "source_path": chunk["source_path"],
+                        "source_name": chunk["source_name"],
+                        "locator": chunk["locator"],
+                    },
+                    ensure_ascii=False,
+                ),
+                now,
+                now,
+            ),
+        )
+        judgement["knowledge_hit_id"] = hit_id
+        hit_ids.append(hit_id)
+    return hit_ids
+
+
+def _normalize_knowledge_point(point: str) -> str:
+    return " ".join(str(point or "").casefold().split())
 
 
 def _snippet(text: str, needles: list[str], *, max_chars: int) -> str:

@@ -30,7 +30,7 @@
 - [Runtime Initializer](scripts/init_modelscope_runtime.py): ModelScope GGUF discovery/download and llama-server command generation.
 - [Provider Env Export](scripts/export_provider_env.py): exports OpenAI-compatible env vars from current Codex provider config for third-party tools.
 - [LlamaIndex RAG Wrapper](scripts/llamaindex_rag.py): optional llamaindex-cli wrapper with explicit provider/base_url env and local JSON result caching.
-- [LlamaIndex sqlite-vec RAG](scripts/llamaindex_sqlite_vec_rag.py): mandatory local RAG script for LlamaIndex file loading, node splitting, llama.cpp embeddings, sqlite-vec vector storage, FTS5+vector hybrid retrieval, and source chunk hit reporting.
+- [LlamaIndex sqlite-vec RAG](scripts/llamaindex_sqlite_vec_rag.py): mandatory local RAG script for LlamaIndex file loading, node splitting, llama.cpp embeddings, sqlite-vec vector storage, FTS5+vector hybrid retrieval, source chunk hit reporting, and persisted knowledge-point bindings.
 - [Library Modules](scripts/senior_exam_writer_lib/): parsing, ingest, retrieval, planning, generation, validation, review, and persistence modules.
 - [Prepare Pipeline](scripts/senior_exam_writer_lib/prepare_pipeline.py): no-embedding batch preparation for prompt packages, source manifests, and next commands.
 - [Source Archive](scripts/senior_exam_writer_lib/source_archive.py): file-type connector hints and original source archiving with relative directory structure.
@@ -39,4 +39,4 @@
 
 - Keep this map short and link-only. Add details to referenced files instead of duplicating them here.
 - Use local file reads against this map before loading large references.
-- Runtime evidence retrieval is vector-first against SQLite `embedding_json`; strict local source-file RAG uses LlamaIndex + sqlite-vec vectors with FTS5 only as hybrid lexical recall, and any external LlamaIndex/MCP results must remain auditable.
+- Runtime evidence retrieval is vector-first against SQLite `embedding_json`; strict local source-file RAG uses LlamaIndex + sqlite-vec vectors with FTS5 only as hybrid lexical recall, persists `rag_knowledge_points` / `rag_knowledge_hits`, and any external LlamaIndex/MCP results must remain auditable.

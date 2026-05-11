@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -95,9 +96,40 @@ def test_sqlite_vec_rag_indexes_chunks_and_reports_source_hits(monkeypatch, tmp_
     assert "vector" in first["retrieval_modes"]
     assert "fts5" in first["retrieval_modes"]
     assert "variance" in first["lexical_terms"]
+    assert first["knowledge_hit_ids"]
     assert first["knowledge_judgement"][0]["knowledge_point"] == "variance"
     assert first["knowledge_judgement"][0]["status"] == "matched"
     assert first["knowledge_judgement"][0]["lexical_match"] is True
+    assert first["knowledge_judgement"][0]["knowledge_hit_id"] == first["knowledge_hit_ids"][0]
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        point_rows = conn.execute(
+            "SELECT knowledge_point, normalized_text FROM rag_knowledge_points ORDER BY knowledge_point"
+        ).fetchall()
+        hit_rows = conn.execute(
+            """
+            SELECT knowledge_point, chunk_id, source_id, status, lexical_match, semantic_score,
+                   matched_text, retrieval_modes_json, lexical_terms_json
+            FROM rag_knowledge_hits
+            ORDER BY knowledge_point
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert {row["knowledge_point"] for row in point_rows} == {"correlation", "variance"}
+    assert {row["normalized_text"] for row in point_rows} == {"correlation", "variance"}
+    assert len(hit_rows) == 4
+    variance_hit = next(row for row in hit_rows if row["knowledge_point"] == "variance")
+    assert variance_hit["chunk_id"] == first["chunk_id"]
+    assert variance_hit["source_id"]
+    assert variance_hit["status"] == "matched"
+    assert variance_hit["lexical_match"] == 1
+    assert "sample variance" in variance_hit["matched_text"]
+    assert "vector" in variance_hit["retrieval_modes_json"]
+    assert "variance" in variance_hit["lexical_terms_json"]
 
 
 def test_sqlite_vec_rag_fts_uses_knowledge_points_when_query_is_natural(monkeypatch, tmp_path: Path) -> None:
@@ -173,7 +205,27 @@ def test_sqlite_vec_rag_fts_uses_knowledge_points_when_query_is_natural(monkeypa
     assert "fts5" in first["retrieval_modes"]
     assert "vector" in first["retrieval_modes"]
     assert "样本方差" in first["lexical_terms"]
+    assert first["knowledge_hit_ids"]
     assert first["knowledge_judgement"][0]["status"] == "matched"
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT p.knowledge_point, h.chunk_id, h.status, h.lexical_match, h.semantic_score
+            FROM rag_knowledge_points p
+            JOIN rag_knowledge_hits h ON h.knowledge_point_id = p.id
+            ORDER BY p.knowledge_point
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert {row["knowledge_point"] for row in rows} == {"n-1", "样本方差"}
+    first_chunk_rows = [row for row in rows if row["chunk_id"] == first["chunk_id"]]
+    assert {row["knowledge_point"] for row in first_chunk_rows} == {"n-1", "样本方差"}
+    assert any(row["status"] == "matched" and row["lexical_match"] == 1 for row in first_chunk_rows)
 
 
 def test_sqlite_vec_rag_query_fails_closed_on_empty_index(tmp_path: Path) -> None:
