@@ -75,6 +75,39 @@ def test_collect_urls_normalizes_html_metadata(monkeypatch, tmp_path: Path) -> N
     assert "published_at" not in record
 
 
+def test_collect_urls_respects_non_utf8_charset(monkeypatch, tmp_path: Path) -> None:
+    html = """
+    <html>
+      <head>
+        <title>中文页面</title>
+        <meta property="og:site_name" content="测试站点" />
+      </head>
+      <body><p>国务院政策材料。</p></body>
+    </html>
+    """.encode("gb18030")
+
+    monkeypatch.setattr(
+        "senior_exam_writer_lib.collection.fetch_url",
+        lambda url, timeout, user_agent: (html, "text/html; charset=gb2312", "https://example.cn/item"),
+    )
+
+    result = collect_urls(
+        urls=["https://example.cn/item"],
+        out_dir=tmp_path / "downloads",
+        jsonl_path=tmp_path / "collected.jsonl",
+        source_name=None,
+        tags=["current_affairs"],
+        query="中文网页编码",
+        timeout=5,
+        user_agent="test-agent",
+    )
+
+    record = result["records"][0]
+    assert record["title"] == "中文页面"
+    assert record["source"] == "测试站点"
+    assert "国务院政策材料" in record["full_text"]
+
+
 def test_persist_fetch_cache_uses_record_whitelist_flags(tmp_path: Path) -> None:
     conn = sqlite3.connect(tmp_path / "cache.sqlite")
     try:
@@ -110,11 +143,17 @@ def test_persist_fetch_cache_uses_record_whitelist_flags(tmp_path: Path) -> None
     assert metadata_by_url["https://blocked.example.com/item"]["is_whitelisted"] is False
 
 
-def test_collect_exam_sources_cli_supports_input_alias_and_ingest(tmp_path: Path, capsys) -> None:
+def test_collect_exam_sources_cli_supports_input_alias_and_ingest(monkeypatch, tmp_path: Path, capsys) -> None:
     source_dir = tmp_path / "historical"
     source_dir.mkdir()
     (source_dir / "exam.txt").write_text("Historical exam item for duplicate scan.", encoding="utf-8")
     db_path = tmp_path / "exam.sqlite"
+
+    monkeypatch.setattr("senior_exam_writer_lib.cli.require_embedding_runtime", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "senior_exam_writer_lib.ingest.llama_embed",
+        lambda texts, _url, _model: [[1.0, 0.0] for _text in texts],
+    )
 
     cmd_collect_exam_sources(
         type(
@@ -138,7 +177,7 @@ def test_collect_exam_sources_cli_supports_input_alias_and_ingest(tmp_path: Path
                 "timeout": 5,
                 "user_agent": "test-agent",
                 "ingest": True,
-                "embed": False,
+                "embed": True,
                 "embed_url": "http://127.0.0.1:8081",
                 "embed_model": "local-embedding",
                 "max_chars": 900,

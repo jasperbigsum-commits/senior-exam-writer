@@ -1,10 +1,10 @@
-# Current Affairs And Current Politics
+﻿# Current Affairs And Current Politics
 
-Use this reference when adding real-time politics, policy updates, news, or热点素材 as auxiliary material for question writing.
+Use this reference when adding real-time politics, policy updates, news, or 热点素材 as auxiliary material for question writing.
 
 ## Role In The System
 
-Current-affairs/current-politics素材 is evidence, not model memory. It must be ingested or retrieved as source material before it can appear in a question.
+Current-affairs/current-politics 素材 is evidence, not model memory. It must be ingested or retrieved as source material before it can appear in a question.
 
 There are two valid roles:
 
@@ -21,7 +21,7 @@ Prefer sources chosen by the user or a course owner:
 - official policy releases, speeches, communiques, notices, or statistical releases;
 - official media or course-approved news sources;
 - teacher-provided current-affairs packets;
-- user-maintained JSON/JSONL素材库 with source, date, URL, and excerpt.
+- user-maintained JSON/JSONL 素材库 with source, date, URL, and excerpt.
 
 Avoid unsourced summaries, screenshots without provenance, social posts without original source, or model-generated summaries that do not cite original text.
 
@@ -62,7 +62,7 @@ JSONL example:
 Ingest example:
 
 ```bash
-python scripts/senior_exam_writer.py ingest \
+uv run python scripts/senior_exam_writer.py ingest \
   --db ./exam_evidence.sqlite \
   --input ./current_affairs.jsonl \
   --kind current_affairs \
@@ -74,7 +74,7 @@ python scripts/senior_exam_writer.py ingest \
 Collect and ingest URLs example:
 
 ```bash
-python scripts/senior_exam_writer.py collect-urls \
+uv run python scripts/senior_exam_writer.py collect-urls \
   --url https://example.gov/item \
   --url https://example.edu/background \
   --query "topic search context" \
@@ -112,7 +112,7 @@ Not allowed:
 - Use a current event as an uncited fact in the analysis.
 - Let background news alone determine the answer to a course concept question.
 - Merge multiple reports into a smooth narrative without preserving source/date boundaries.
-- Treat outdated current-affairs素材 as still valid without review.
+- Treat outdated current-affairs 素材 as still valid without review.
 
 ## Audit Checks
 
@@ -121,3 +121,4 @@ Not allowed:
 - Is the answer key supported by the correct role?
 - Is there a review window for time-sensitive material?
 - Are source conflicts surfaced instead of hidden?
+

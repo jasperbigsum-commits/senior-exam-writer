@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import sqlite3
 import uuid
@@ -14,13 +15,68 @@ from .validation import validate_task_definition
 def read_json_arg(value: str | None, label: str) -> Any:
     if value is None:
         return {}
-    path = Path(value)
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    text = str(value).strip()
+    path = _existing_path(text)
+    if path is not None:
+        return _load_json_text(path.read_text(encoding="utf-8-sig", errors="replace"))
+    for candidate in _json_arg_candidates(text):
+        try:
+            return _load_json_text(candidate)
+        except json.JSONDecodeError:
+            pass
+        try:
+            literal = ast.literal_eval(candidate)
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(literal, str):
+            try:
+                return _load_json_text(literal)
+            except json.JSONDecodeError:
+                continue
+        return literal
+    raise ValueError(
+        f"{label} must be JSON or a path to a JSON file; prefer a UTF-8 JSON file "
+        "when invoking from PowerShell/CMD to avoid shell escaping issues"
+    )
+
+
+def _existing_path(value: str) -> Path | None:
     try:
-        return json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{label} must be JSON or a path to a JSON file") from exc
+        path = Path(value).expanduser()
+        return path if path.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _load_json_text(text: str) -> Any:
+    parsed = json.loads(text.lstrip("\ufeff"))
+    if isinstance(parsed, str):
+        nested = parsed.strip().lstrip("\ufeff")
+        if nested.startswith(("{", "[")):
+            return json.loads(nested)
+    return parsed
+
+
+def _json_arg_candidates(text: str) -> list[str]:
+    stripped = text.strip().lstrip("\ufeff")
+    candidates = [stripped]
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        candidates.append(stripped[1:-1].strip().lstrip("\ufeff"))
+    for candidate in list(candidates):
+        if '\\"' in candidate:
+            unescaped = candidate
+            while '\\"' in unescaped:
+                unescaped = unescaped.replace('\\"', '"')
+            candidates.append(unescaped)
+        if '""' in candidate:
+            candidates.append(candidate.replace('""', '"'))
+    unique: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            unique.append(candidate)
+            seen.add(candidate)
+    return unique
 
 
 def create_or_update_task(

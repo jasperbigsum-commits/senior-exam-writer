@@ -1,4 +1,4 @@
-# SQLite Schema
+﻿# SQLite Schema
 
 The database is a local evidence store. It is intentionally simple enough to inspect with `sqlite3`.
 
@@ -19,10 +19,6 @@ The database is a local evidence store. It is intentionally simple enough to ins
 - `path` stores the chapter/section route;
 - `text` stores the retrievable content;
 - `embedding_json` stores local llama.cpp embedding vectors when available.
-
-`chunks_fts`
-
-- SQLite FTS5 index for keyword/BM25 retrieval.
 
 `questions`
 
@@ -85,23 +81,24 @@ The database is a local evidence store. It is intentionally simple enough to ins
 
 ## Retrieval Pattern
 
-1. Search overview and TOC chunks to route to likely chapter paths.
-2. Search content chunks with BM25 and vectors.
+1. Embed the query with the same local embedding model used during ingestion.
+2. Rank chunks by vector similarity against `chunks.embedding_json`.
 3. Expand child chunks to parent chunks for generation context.
-4. Rank by combined keyword, vector, and route scores.
+4. Refuse retrieval if the query embedding endpoint or stored chunk vectors are missing.
 
 ## Maintenance
 
 Use `vacuum` after large deletions:
 
 ```bash
-python scripts/senior_exam_writer.py vacuum --db ./exam_evidence.sqlite
+uv run python scripts/senior_exam_writer.py vacuum --db ./exam_evidence.sqlite
 ```
 
 Use `audit-duplicates --backfill` when opening an older database that predates chunk fingerprints:
 
 ```bash
-python scripts/senior_exam_writer.py audit-duplicates --db ./exam_evidence.sqlite --backfill
+uv run python scripts/senior_exam_writer.py audit-duplicates --db ./exam_evidence.sqlite --backfill
 ```
 
 Generation is blocked when chunks lack fingerprints or exact duplicate fingerprint groups remain.
+

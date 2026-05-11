@@ -3,28 +3,30 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 import sqlite3
-import sys
+from dataclasses import dataclass
 from typing import Any
 
 from .common import Evidence
 from .evidence_roles import item_role_for_source_kind, role_for_source_kind
 from .llama_cpp_client import llama_embed
 
-def tokenize_query(query: str) -> list[str]:
-    terms = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z0-9_]{2,}", query)
-    if not terms and query.strip():
-        terms = [query.strip()]
-    return terms[:12]
 
-def fts_match_query(query: str) -> str:
-    terms = tokenize_query(query)
-    escaped = []
-    for term in terms:
-        term = term.replace('"', '""')
-        escaped.append(f'"{term}"')
-    return " OR ".join(escaped) if escaped else '""'
+@dataclass(frozen=True)
+class RetrievalCandidate:
+    row: sqlite3.Row
+    score: float
+
+def add_candidate(
+    candidates: dict[str, RetrievalCandidate],
+    row: sqlite3.Row,
+    score: float,
+) -> None:
+    current = candidates.get(row["id"])
+    if current:
+        candidates[row["id"]] = RetrievalCandidate(row=row, score=current.score + score)
+    else:
+        candidates[row["id"]] = RetrievalCandidate(row=row, score=score)
 
 def cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
@@ -53,15 +55,6 @@ def load_metadata(raw: str | None) -> dict[str, Any]:
         return {}
     return data if isinstance(data, dict) else {}
 
-def keyword_substring_score(query: str, text: str, path: str, title: str) -> float:
-    haystack = f"{title}\n{path}\n{text}".lower()
-    score = 0.0
-    for term in tokenize_query(query):
-        score += haystack.count(term.lower()) * 0.6
-    if len(query.strip()) >= 2 and query.strip().lower() in haystack:
-        score += 1.2
-    return score
-
 def retrieve_evidence(
     conn: sqlite3.Connection,
     query: str,
@@ -71,93 +64,39 @@ def retrieve_evidence(
     embed_model: str,
     layers: set[str] | None = None,
 ) -> list[Evidence]:
+    if not embed_url:
+        raise ValueError("vector retrieval requires embed_url")
     layers = layers or {"overview", "toc", "parent", "content"}
-    route_paths: set[str] = set()
-    fts_q = fts_match_query(query)
-
-    route_rows: list[sqlite3.Row] = []
-    try:
-        route_rows = conn.execute(
-            """
-            SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at,
-                   bm25(chunks_fts) AS bm25_rank
-            FROM chunks_fts
-            JOIN chunks c ON c.id = chunks_fts.chunk_id
-            JOIN sources s ON s.id = c.source_id
-            WHERE chunks_fts MATCH ? AND c.layer IN ('overview', 'toc')
-            ORDER BY bm25_rank
-            LIMIT 20
-            """,
-            (fts_q,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        route_rows = []
-    for row in route_rows:
-        if row["path"]:
-            route_paths.add(row["path"])
-        for line in (row["text"] or "").splitlines():
-            if any(term in line for term in tokenize_query(query)):
-                route_paths.add(line.strip())
-
-    candidates: dict[str, dict[str, Any]] = {}
-    try:
-        rows = conn.execute(
-            """
-            SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at,
-                   bm25(chunks_fts) AS bm25_rank
-            FROM chunks_fts
-            JOIN chunks c ON c.id = chunks_fts.chunk_id
-            JOIN sources s ON s.id = c.source_id
-            WHERE chunks_fts MATCH ?
-            ORDER BY bm25_rank
-            LIMIT 80
-            """,
-            (fts_q,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        rows = []
-    for row in rows:
-        if row["layer"] not in layers:
-            continue
-        bm25_score = 1.0 / (1.0 + max(0.0, float(row["bm25_rank"])))
-        candidates[row["id"]] = {"row": row, "score": bm25_score * 2.0}
-
+    candidates: dict[str, RetrievalCandidate] = {}
     rows = conn.execute(
         """
         SELECT c.*, s.kind, s.title AS source_title, s.path AS source_path, s.source_name, s.url, s.published_at
         FROM chunks c
         JOIN sources s ON s.id = c.source_id
-        WHERE c.layer IN ('parent', 'content')
+        WHERE c.layer IN ('overview', 'toc', 'parent', 'content')
         """
     ).fetchall()
     query_vec = None
     if embed_url:
-        try:
-            query_vec = llama_embed([query], embed_url, embed_model)[0]
-        except Exception as exc:
-            print(f"[warn] embedding retrieval disabled: {exc}", file=sys.stderr)
+        query_vec = llama_embed([query], embed_url, embed_model)[0]
+    semantic_rows: list[tuple[float, sqlite3.Row]] = []
     for row in rows:
         if row["layer"] not in layers:
             continue
-        score = keyword_substring_score(query, row["text"], row["path"] or "", row["title"] or "")
-        if route_paths and any(rp and (rp in (row["path"] or "") or (row["path"] or "") in rp) for rp in route_paths):
-            score += 0.8
         if query_vec:
             vec = load_vector(row["embedding_json"])
             if vec:
-                score += max(0.0, cosine(query_vec, vec)) * 2.5
-        if score <= 0:
-            continue
-        current = candidates.get(row["id"])
-        if current:
-            current["score"] += score
-        else:
-            candidates[row["id"]] = {"row": row, "score": score}
+                similarity = cosine(query_vec, vec)
+                if similarity > 0:
+                    semantic_rows.append((similarity, row))
+    semantic_limit = max(80, top_k * 12)
+    for rank, (similarity, row) in enumerate(sorted(semantic_rows, key=lambda item: item[0], reverse=True)[:semantic_limit], 1):
+        add_candidate(candidates, row, max(0.0, similarity))
 
-    expanded: dict[str, dict[str, Any]] = {}
+    expanded: dict[str, RetrievalCandidate] = {}
     for item in candidates.values():
-        row = item["row"]
-        score = float(item["score"])
+        row = item.row
+        score = float(item.score)
         if row["layer"] == "content" and row["parent_id"]:
             parent = conn.execute(
                 """
@@ -170,17 +109,17 @@ def retrieve_evidence(
             ).fetchone()
             if parent:
                 prev = expanded.get(parent["id"])
-                if not prev or prev["score"] < score + 0.35:
-                    expanded[parent["id"]] = {"row": parent, "score": score + 0.35}
+                if not prev or prev.score < score + 0.35:
+                    expanded[parent["id"]] = RetrievalCandidate(row=parent, score=score + 0.35)
         prev = expanded.get(row["id"])
-        if not prev or prev["score"] < score:
-            expanded[row["id"]] = {"row": row, "score": score}
+        if not prev or prev.score < score:
+            expanded[row["id"]] = RetrievalCandidate(row=row, score=score)
 
-    ranked = sorted(expanded.values(), key=lambda x: x["score"], reverse=True)
+    ranked = sorted(expanded.values(), key=lambda x: x.score, reverse=True)
     evidences: list[Evidence] = []
     seen_text: set[str] = set()
     for idx, item in enumerate(ranked, 1):
-        row = item["row"]
+        row = item.row
         metadata = load_metadata(row["metadata_json"])
         digest = hashlib.sha1((row["text"] or "")[:500].encode("utf-8", errors="ignore")).hexdigest()
         if digest in seen_text:
@@ -196,7 +135,7 @@ def retrieve_evidence(
                 title=row["title"] or "",
                 locator=row["locator"] or "",
                 text=row["text"] or "",
-                score=round(float(item["score"]), 4),
+                score=round(float(item.score), 4),
                 source_title=row["source_title"] or "",
                 source_path=row["source_path"] or "",
                 source_kind=row["kind"],

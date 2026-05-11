@@ -35,7 +35,7 @@ def test_candidate_questions_schema_has_auditable_writer_fields(tmp_path) -> Non
     assert {"writer_id", "round", "prompt_json", "output_json", "verification_json"}.issubset(columns)
 
 
-def test_generate_candidates_persists_writer_fields(tmp_path, capsys) -> None:
+def test_generate_candidates_persists_writer_fields(monkeypatch, tmp_path, capsys) -> None:
     db_path = tmp_path / "candidates.sqlite"
     conn = connect(str(db_path))
     try:
@@ -92,6 +92,35 @@ def test_generate_candidates_persists_writer_fields(tmp_path, capsys) -> None:
         )
         conn.execute(
             """
+            INSERT INTO sources
+            (id, kind, title, path, source_name, url, published_at, version, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("source-1", "book", "Source 1", "source.txt", None, None, None, None, "{}", now),
+        )
+        conn.execute(
+            """
+            INSERT INTO chunks
+            (id, source_id, parent_id, layer, path, title, locator, text, token_count, embedding_json, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "chunk-1",
+                "source-1",
+                None,
+                "content",
+                "Source 1",
+                "Source 1",
+                "p.1",
+                "evidence",
+                1,
+                "[1.0, 0.0]",
+                "{}",
+                now,
+            ),
+        )
+        conn.execute(
+            """
             INSERT INTO evidence_points
             (id, planning_unit_id, evidence_id, source_id, chunk_id, support_status, role, claim_text, citation_text, metadata_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -114,12 +143,16 @@ def test_generate_candidates_persists_writer_fields(tmp_path, capsys) -> None:
     finally:
         conn.close()
 
+    monkeypatch.setattr("senior_exam_writer_lib.cli.require_embedding_runtime", lambda *_args, **_kwargs: None)
+
     cmd_generate_candidates(
         argparse.Namespace(
             db=str(db_path),
             planning_unit_id="plan-1",
             topic="共同富裕",
             writer_count=2,
+            embed_url="http://127.0.0.1:8081",
+            embed_model="local-embedding",
         )
     )
 

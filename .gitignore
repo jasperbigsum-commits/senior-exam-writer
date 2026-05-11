@@ -3,6 +3,15 @@ __pycache__/
 .pytest_cache/
 .pytest_cache_local/
 .pytest_tmp/
+.venv/
+models/
+exam_run/
+prepared_pipeline/
+original_sources/
+llamaindex_results/
+collected_sources/
+historical_downloads/
+.senior-exam-writer/
 *.sqlite
 *.sqlite-*
 *.db

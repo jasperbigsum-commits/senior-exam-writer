@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,3 +77,14 @@ def stable_id(*parts: str) -> str:
         h.update(part.encode("utf-8", errors="ignore"))
         h.update(b"\0")
     return h.hexdigest()[:24]
+
+def configure_stdio_utf8() -> None:
+    """Keep Chinese JSON output stable on Windows terminals and subprocess captures."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except Exception:
+            pass

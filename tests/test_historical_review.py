@@ -112,6 +112,7 @@ def test_cli_audit_question_similarity_persists_audit_rows(monkeypatch, tmp_path
             embedder=lambda texts, _url, _model: [[1.0, 0.0] for _text in texts],
         ),
     )
+    monkeypatch.setattr("senior_exam_writer_lib.cli.require_embedding_runtime", lambda *_args, **_kwargs: None)
 
     cmd_audit_question_similarity(
         argparse.Namespace(
@@ -199,6 +200,7 @@ def test_cli_audit_question_similarity_can_audit_final_question(monkeypatch, tmp
             embedder=lambda texts, _url, _model: [[1.0, 0.0] for _text in texts],
         ),
     )
+    monkeypatch.setattr("senior_exam_writer_lib.cli.require_embedding_runtime", lambda *_args, **_kwargs: None)
 
     cmd_audit_question_similarity(
         argparse.Namespace(

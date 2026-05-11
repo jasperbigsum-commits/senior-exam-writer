@@ -19,6 +19,7 @@ from .common import (
     DEFAULT_LLM_URL,
     DEFAULT_USER_AGENT,
     SOURCE_KINDS,
+    configure_stdio_utf8,
     now_iso,
     stable_id,
 )
@@ -35,8 +36,9 @@ from .generation import (
 )
 from .historical_review import THRESHOLD_POLICY, audit_candidate_batch, audit_question_batch
 from .ingest import collect_files, ingest_file
-from .llama_cpp_client import llama_chat
+from .llama_cpp_client import llama_chat, llama_embed
 from .planning import build_planning_units
+from .prepare_pipeline import build_prepare_pipeline
 from .requirement_prompts import build_requirement_prompt_package, prompt_package_to_jsonl
 from .retrieval import evidence_to_json, gate_evidence, retrieve_evidence
 from .runtime import init_runtime_layout, persist_fetch_cache, probe_json
@@ -74,16 +76,24 @@ def cmd_init_db(args: argparse.Namespace) -> None:
 
 def cmd_init_runtime(args: argparse.Namespace) -> None:
     validate_local_endpoint(args.embed_url, "embed_url")
-    validate_local_endpoint(args.llm_url, "llm_url")
     runtime = init_runtime_layout(args.db, sidecar_root=args.sidecar_root)
-    embed_probe = probe_json(args.embed_url)
-    llm_probe = probe_json(args.llm_url)
-    ok = bool(embed_probe.get("ok")) and bool(llm_probe.get("ok"))
+    root_embed_probe = probe_json(args.embed_url)
+    embed_probe = probe_embedding_endpoint(args.embed_url, args.embed_model)
+    llm_probe: dict[str, Any] | None = None
+    root_llm_probe: dict[str, Any] | None = None
+    if args.llm_url:
+        validate_local_endpoint(args.llm_url, "llm_url")
+        root_llm_probe = probe_json(args.llm_url)
+        llm_probe = probe_llm_endpoint(args.llm_url, args.llm_model)
+    ok = bool(embed_probe.get("ok")) and (llm_probe is None or bool(llm_probe.get("ok")))
     result = {
         "ok": ok,
         "runtime": runtime,
+        "root_embed_probe": root_embed_probe,
         "embed_probe": embed_probe,
+        "root_llm_probe": root_llm_probe,
         "llm_probe": llm_probe,
+        "llm_required": bool(args.llm_url),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if not ok:
@@ -95,10 +105,115 @@ def validate_embed_endpoint_when_used(embed: bool, embed_url: str) -> None:
         validate_local_endpoint(embed_url, "embed_url")
 
 
+def probe_embedding_endpoint(embed_url: str, embed_model: str) -> dict[str, Any]:
+    validate_local_endpoint(embed_url, "embed_url")
+    try:
+        vectors = llama_embed(["中文向量健康检查：考试大纲、知识点、证据点。"], embed_url, embed_model)
+        dimension = len(vectors[0]) if vectors and vectors[0] else 0
+        if dimension <= 0:
+            return {"ok": False, "url": embed_url, "model": embed_model, "error": "empty embedding vector"}
+        return {"ok": True, "url": embed_url, "model": embed_model, "dimension": dimension}
+    except Exception as exc:
+        return {"ok": False, "url": embed_url, "model": embed_model, "error": str(exc)}
+
+
+def probe_llm_endpoint(llm_url: str, llm_model: str) -> dict[str, Any]:
+    validate_local_endpoint(llm_url, "llm_url")
+    try:
+        text = llama_chat(
+            [{"role": "user", "content": "请只回复 OK，用于本地出题模型健康检查。"}],
+            llm_url,
+            llm_model,
+            temperature=0.0,
+            max_tokens=8,
+        )
+        if not str(text or "").strip():
+            return {"ok": False, "url": llm_url, "model": llm_model, "error": "empty generation response"}
+        return {"ok": True, "url": llm_url, "model": llm_model, "sample": str(text).strip()[:40]}
+    except Exception as exc:
+        return {"ok": False, "url": llm_url, "model": llm_model, "error": str(exc)}
+
+
+def require_embedding_runtime(embed_url: str, embed_model: str) -> None:
+    probe = probe_embedding_endpoint(embed_url, embed_model)
+    if not probe.get("ok"):
+        raise ValidationError(
+            [
+                "local embedding runtime is not ready; start llama.cpp with a Chinese-capable embedding GGUF before ingestion or retrieval",
+                f"embed_url={embed_url}",
+                f"embed_model={embed_model}",
+                f"probe_error={probe.get('error') or 'unknown'}",
+            ]
+        )
+
+
+def require_llm_runtime(llm_url: str, llm_model: str) -> None:
+    probe = probe_llm_endpoint(llm_url, llm_model)
+    if not probe.get("ok"):
+        raise ValidationError(
+            [
+                "local generation runtime is not ready; start llama.cpp with an instruction GGUF before candidate or final generation",
+                f"llm_url={llm_url}",
+                f"llm_model={llm_model}",
+                f"probe_error={probe.get('error') or 'unknown'}",
+            ]
+        )
+
+
+def require_vectorized_corpus(conn: sqlite3.Connection, *, require_chunks: bool = True) -> None:
+    row = conn.execute(
+        """
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN embedding_json IS NULL OR embedding_json = '' THEN 1 ELSE 0 END) AS missing
+        FROM chunks
+        """
+    ).fetchone()
+    total = int(row["total"] or 0)
+    missing = int(row["missing"] or 0)
+    issues: list[str] = []
+    if require_chunks and total <= 0:
+        issues.append("no indexed chunks found; ingest sources with local embeddings before continuing")
+    if missing > 0:
+        sample_rows = conn.execute(
+            """
+            SELECT s.kind, s.title, c.layer, c.path, c.locator
+            FROM chunks c
+            JOIN sources s ON s.id = c.source_id
+            WHERE c.embedding_json IS NULL OR c.embedding_json = ''
+            ORDER BY s.kind, s.title, c.layer, c.id
+            LIMIT 5
+            """
+        ).fetchall()
+        samples = [
+            f"{row['kind']}:{row['title']}:{row['layer']}:{row['locator'] or row['path'] or ''}"
+            for row in sample_rows
+        ]
+        issues.append(
+            "all chunks must be vectorized by the local embedding model before planning, retrieval, generation, or review"
+        )
+        issues.append(f"unembedded_chunks={missing}/{total}")
+        if samples:
+            issues.append(f"sample_unembedded_chunks={samples}")
+    if issues:
+        raise ValidationError(issues)
+
+
+def require_ingest_embeddings(args: argparse.Namespace) -> None:
+    if not args.embed:
+        raise ValidationError(
+            [
+                "ingestion requires local embeddings; --no-embed is disabled for evidence-gated exam workflows",
+                "start a Chinese-capable llama.cpp embedding server and rerun with --embed",
+            ]
+        )
+    require_embedding_runtime(args.embed_url, args.embed_model)
+
+
 def cmd_ingest(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
-    validate_embed_endpoint_when_used(args.embed, args.embed_url)
+    require_ingest_embeddings(args)
     files = collect_files(Path(args.input))
     if not files:
         raise SystemExit(f"no supported files found in {args.input}")
@@ -137,6 +252,10 @@ def cmd_collect_urls(args: argparse.Namespace) -> None:
     urls = read_url_list(args.url, args.url_file)
     if not urls:
         raise SystemExit("no URLs provided; use --url or --url-file")
+    if args.ingest:
+        if not args.db:
+            raise SystemExit("--ingest requires --db")
+        require_ingest_embeddings(args)
     result = collect_urls(
         urls=urls,
         out_dir=Path(args.out_dir),
@@ -149,9 +268,6 @@ def cmd_collect_urls(args: argparse.Namespace) -> None:
     )
     ingest_results: list[dict[str, Any]] = []
     if args.ingest:
-        if not args.db:
-            raise SystemExit("--ingest requires --db")
-        validate_embed_endpoint_when_used(args.embed, args.embed_url)
         validate_ingest_request(
             input_path=Path(args.output_jsonl),
             kind=args.kind,
@@ -212,6 +328,10 @@ def cmd_collect_exam_sources(args: argparse.Namespace) -> None:
     local_paths = [Path(path) for path in local_values]
     if not urls and not local_paths:
         raise SystemExit("no sources provided; use --local-path, --input, --url, or --url-file")
+    if args.ingest:
+        if not args.db:
+            raise SystemExit("--ingest requires --db")
+        require_ingest_embeddings(args)
     tags = args.tag or ["historical_exam"]
     result = collect_exam_sources(
         urls=urls,
@@ -233,7 +353,6 @@ def cmd_collect_exam_sources(args: argparse.Namespace) -> None:
         ensure_db(conn)
         persist_fetch_cache(conn, result["records"], False)
         if args.ingest:
-            validate_embed_endpoint_when_used(args.embed, args.embed_url)
             ingest_result = ingest_file(
                 conn,
                 Path(args.output_jsonl),
@@ -282,20 +401,53 @@ def cmd_split_requirements(args: argparse.Namespace) -> None:
         output_path.write_text(prompt_package_to_jsonl(package), encoding="utf-8")
     print(json.dumps({"ok": True, "prompt_package": package}, ensure_ascii=False, indent=2))
 
+
+def cmd_prepare_pipeline(args: argparse.Namespace) -> None:
+    if args.requirements_file:
+        requirement_text = Path(args.requirements_file).read_text(encoding="utf-8", errors="replace")
+    else:
+        requirement_text = args.requirements or ""
+    materials = [Path(path) for path in args.input or []]
+    if not materials:
+        raise ValueError("prepare-pipeline requires at least one --input file or directory")
+    report = build_prepare_pipeline(
+        requirement_text=requirement_text,
+        materials=materials,
+        output_dir=Path(args.output_dir),
+        db_path=args.db,
+        task_name=args.task_name,
+        language=args.language,
+        writer_count=args.writer_count,
+        embed_url=args.embed_url,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 def cmd_retrieve(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
     embed_url = args.embed_url if args.embed_url else None
     if embed_url:
         validate_local_endpoint(embed_url, "embed_url")
-    evidence = retrieve_evidence(conn, args.query, top_k=args.top_k, embed_url=embed_url, embed_model=args.embed_model)
+        require_embedding_runtime(embed_url, args.embed_model)
+        require_vectorized_corpus(conn)
+    evidence = retrieve_evidence(
+        conn,
+        args.query,
+        top_k=args.top_k,
+        embed_url=embed_url,
+        embed_model=args.embed_model,
+    )
     print(json.dumps({"query": args.query, "evidence": evidence_to_json(evidence, max_chars=args.max_chars)}, ensure_ascii=False, indent=2))
 
 def cmd_generate(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
     validate_local_endpoint(args.embed_url, "embed_url")
+    require_embedding_runtime(args.embed_url, args.embed_model)
     validate_local_endpoint(args.llm_url, "llm_url")
+    require_llm_runtime(args.llm_url, args.llm_model)
+    require_vectorized_corpus(conn)
     task_context = load_task_context(conn, args.task_id)
     validate_generation_request(
         conn=conn,
@@ -469,6 +621,8 @@ def cmd_generate_candidates(args: argparse.Namespace) -> None:
         raise ValueError("--writer-count must be greater than 0")
     conn = connect(args.db)
     ensure_db(conn)
+    require_embedding_runtime(args.embed_url, args.embed_model)
+    require_vectorized_corpus(conn)
     row = conn.execute(
         """
         SELECT *
@@ -479,6 +633,15 @@ def cmd_generate_candidates(args: argparse.Namespace) -> None:
     ).fetchone()
     if not row:
         raise ValueError(f"planning unit not found: {args.planning_unit_id}")
+    if row["evidence_status"] != "strong":
+        raise ValidationError(
+            [
+                "planning unit must have strong evidence support before candidate generation",
+                f"planning_unit_id={args.planning_unit_id}",
+                f"evidence_status={row['evidence_status'] or 'pending'}",
+                "run plan-evidence after successful vectorized ingestion, or backfill missing evidence",
+            ]
+        )
 
     try:
         raw_points = json.loads(row["knowledge_points_json"] or "[]")
@@ -569,8 +732,10 @@ def cmd_generate_candidates(args: argparse.Namespace) -> None:
 
 def cmd_audit_question_similarity(args: argparse.Namespace) -> None:
     validate_local_endpoint(args.embed_url, "embed_url")
+    require_embedding_runtime(args.embed_url, args.embed_model)
     conn = connect(args.db)
     ensure_db(conn)
+    require_vectorized_corpus(conn)
     question_id = getattr(args, "question_id", None)
     planning_unit_id = getattr(args, "planning_unit_id", None)
     task_id = getattr(args, "task_id", None)
@@ -715,6 +880,8 @@ def cmd_plan_evidence(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
     validate_local_endpoint(args.embed_url, "embed_url")
+    require_embedding_runtime(args.embed_url, args.embed_model)
+    require_vectorized_corpus(conn)
     rows = conn.execute(
         """
         SELECT *
@@ -929,6 +1096,7 @@ def cmd_review_candidate(args: argparse.Namespace) -> None:
 def cmd_complete_task(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     ensure_db(conn)
+    require_vectorized_corpus(conn)
     task = task_to_json(get_task(conn, args.task_id))
     report = validate_task_completion(conn, task)
     if not report["ok"]:
@@ -974,12 +1142,12 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent(
             """
             Examples:
-              python scripts/senior_exam_writer.py init-db --db ./exam.sqlite
-              python scripts/senior_exam_writer.py create-task --db ./exam.sqlite --name "期末政治理论" --outline ./outline.json --coverage ./coverage.json
-              python scripts/senior_exam_writer.py ingest --db ./exam.sqlite --input ./materials --kind book --embed
-              python scripts/senior_exam_writer.py retrieve --db ./exam.sqlite --query "共同富裕"
-              python scripts/senior_exam_writer.py generate --db ./exam.sqlite --task-id TASK_ID --topic "共同富裕" --count 3 --llm-verify
-              python scripts/senior_exam_writer.py review-question --db ./exam.sqlite --question-id QUESTION_ID --decision approved
+              uv run python scripts/senior_exam_writer.py init-db --db ./exam.sqlite
+              uv run python scripts/senior_exam_writer.py create-task --db ./exam.sqlite --name "期末政治理论" --outline ./outline.json --coverage ./coverage.json
+              uv run python scripts/senior_exam_writer.py ingest --db ./exam.sqlite --input ./materials --kind book
+              uv run python scripts/senior_exam_writer.py retrieve --db ./exam.sqlite --query "共同富裕"
+              uv run python scripts/senior_exam_writer.py generate --db ./exam.sqlite --task-id TASK_ID --topic "共同富裕" --count 3 --llm-verify
+              uv run python scripts/senior_exam_writer.py review-question --db ./exam.sqlite --question-id QUESTION_ID --decision approved
             """
         ),
     )
@@ -989,11 +1157,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", required=True)
     p.set_defaults(func=cmd_init_db)
 
-    p = sub.add_parser("init-runtime", help="create local runtime sidecar folders and probe local endpoints")
+    p = sub.add_parser("init-runtime", help="create local runtime sidecar folders and probe the required embedding endpoint")
     p.add_argument("--db", required=True)
     p.add_argument("--sidecar-root")
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
-    p.add_argument("--llm-url", default=DEFAULT_LLM_URL)
+    p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
+    p.add_argument("--llm-url", default="", help="optional local LLM verifier endpoint; not required when Codex/agent generates and reviews")
+    p.add_argument("--llm-model", default=DEFAULT_LLM_MODEL)
     p.set_defaults(func=cmd_init_runtime)
 
     p = sub.add_parser("split-requirements", help="split an entry requirement into executable stage prompts")
@@ -1006,6 +1176,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-jsonl", help="optional path for per-stage prompt JSONL")
     p.set_defaults(func=cmd_split_requirements)
 
+    p = sub.add_parser("prepare-pipeline", help="batch deterministic preparation without requiring an embedding server")
+    p.add_argument("--requirements", help="natural-language requirement text")
+    p.add_argument("--requirements-file", help="file containing natural-language requirement text")
+    p.add_argument("--input", action="append", help="local material file or directory; repeatable")
+    p.add_argument("--output-dir", required=True, help="directory for prompt package, source manifest, and next command files")
+    p.add_argument("--db", default="./exam_evidence.sqlite")
+    p.add_argument("--task-name")
+    p.add_argument("--language", default="zh-CN")
+    p.add_argument("--writer-count", type=int, default=3)
+    p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
+    p.set_defaults(func=cmd_prepare_pipeline)
+
     p = sub.add_parser("ingest", help="ingest files into the evidence database")
     p.add_argument("--db", required=True)
     p.add_argument("--input", required=True, help="file or directory")
@@ -1016,14 +1198,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--published-at")
     p.add_argument("--version")
     p.add_argument("--embed", action="store_true", help="call local llama.cpp embedding server")
-    p.add_argument("--no-embed", action="store_false", dest="embed")
+    p.add_argument("--no-embed", action="store_false", dest="embed", help="disabled for production evidence workflows; kept only to produce a policy error")
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.add_argument("--max-chars", type=int, default=900)
     p.add_argument("--dedup-threshold", type=float, default=0.9, help="near-duplicate threshold for chunk blocking")
     p.add_argument("--semantic-dedup-threshold", type=float, default=0.985, help="embedding cosine threshold used for semantic duplicate blocking when --embed is enabled")
     p.add_argument("--allow-duplicate-chunks", action="store_true", help="store duplicate chunks instead of recording them as blocked duplicates")
-    p.set_defaults(func=cmd_ingest, embed=False)
+    p.set_defaults(func=cmd_ingest, embed=True)
 
     p = sub.add_parser("create-task", help="create or update an exam-writing task with outline, rules, requirements, and coverage plan")
     p.add_argument("--db", required=True)
@@ -1080,14 +1262,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ingest", action="store_true", help="ingest the generated JSONL into --db as current_affairs")
     p.add_argument("--db")
     p.add_argument("--embed", action="store_true")
-    p.add_argument("--no-embed", action="store_false", dest="embed")
+    p.add_argument("--no-embed", action="store_false", dest="embed", help="disabled when --ingest is used; kept only to produce a policy error")
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.add_argument("--max-chars", type=int, default=900)
     p.add_argument("--dedup-threshold", type=float, default=0.9)
     p.add_argument("--semantic-dedup-threshold", type=float, default=0.985)
     p.add_argument("--allow-duplicate-chunks", action="store_true")
-    p.set_defaults(func=cmd_collect_urls, embed=False)
+    p.set_defaults(func=cmd_collect_urls, embed=True)
 
     p = sub.add_parser("collect-exam-sources", help="collect local files and URLs into historical exam JSONL")
     p.add_argument("--db", help="optional SQLite DB used to persist fetch cache metadata")
@@ -1108,14 +1290,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     p.add_argument("--ingest", action="store_true", help="ingest generated JSONL as historical_exam")
     p.add_argument("--embed", action="store_true")
-    p.add_argument("--no-embed", action="store_false", dest="embed")
+    p.add_argument("--no-embed", action="store_false", dest="embed", help="disabled when --ingest is used; kept only to produce a policy error")
     p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
     p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.add_argument("--max-chars", type=int, default=900)
     p.add_argument("--dedup-threshold", type=float, default=0.9)
     p.add_argument("--semantic-dedup-threshold", type=float, default=0.985)
     p.add_argument("--allow-duplicate-chunks", action="store_true")
-    p.set_defaults(func=cmd_collect_exam_sources, embed=False)
+    p.set_defaults(func=cmd_collect_exam_sources, embed=True)
 
     p = sub.add_parser("retrieve", help="retrieve evidence for inspection")
     p.add_argument("--db", required=True)
@@ -1129,7 +1311,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("generate", help="generate evidence-gated exam questions")
     p.add_argument("--db", required=True)
     p.add_argument("--topic", required=True)
-    p.add_argument("--question-type", default="single_choice", choices=["single_choice", "multiple_choice", "material_analysis", "short_answer"])
+    p.add_argument("--question-type", default="single_choice", choices=["single_choice", "multiple_choice", "material_analysis", "short_answer", "calculation"])
     p.add_argument("--count", type=int, default=3)
     p.add_argument("--difficulty", default="medium", choices=["easy", "medium", "hard"])
     p.add_argument("--language", default="zh-CN")
@@ -1154,6 +1336,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--planning-unit-id", required=True)
     p.add_argument("--topic", required=True)
     p.add_argument("--writer-count", type=int, default=3)
+    p.add_argument("--embed-url", default=DEFAULT_EMBED_URL)
+    p.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
     p.set_defaults(func=cmd_generate_candidates)
 
     p = sub.add_parser("audit-question-similarity", help="run local similarity review against historical and prior corpora")
@@ -1198,6 +1382,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 def main(argv: list[str] | None = None) -> int:
+    configure_stdio_utf8()
     parser = build_parser()
     args = parser.parse_args(argv)
     started = time.time()

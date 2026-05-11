@@ -122,7 +122,7 @@ def test_cli_plan_commands_persist_objective_and_ignore_non_knowledge_units(
                 "source-1",
                 "book",
                 "Source 1",
-                None,
+                "source.txt",
                 None,
                 None,
                 None,
@@ -147,7 +147,7 @@ def test_cli_plan_commands_persist_objective_and_ignore_non_knowledge_units(
                 None,
                 "example",
                 0,
-                None,
+                "[1.0, 0.0]",
                 "{}",
                 "2026-05-11T00:00:00+00:00",
             ),
@@ -191,6 +191,7 @@ def test_cli_plan_commands_persist_objective_and_ignore_non_knowledge_units(
         }
 
     monkeypatch.setattr("senior_exam_writer_lib.cli._collect_evidence_bundle", fake_collect_evidence_bundle)
+    monkeypatch.setattr("senior_exam_writer_lib.cli.require_embedding_runtime", lambda *_args, **_kwargs: None)
 
     cmd_plan_evidence(
         argparse.Namespace(

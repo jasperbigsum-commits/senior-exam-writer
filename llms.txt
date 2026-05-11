@@ -1,0 +1,42 @@
+# 循证出题官
+
+> Local evidence-gated Chinese exam-question workflow. Use SQLite, local llama.cpp embeddings, explicit citations, historical duplicate review, and human review gates.
+
+## Core
+
+- [Skill Entry](SKILL.md): minimal operating rules and command graph.
+- [End-to-End Workflow](references/task_workflow.md): closed-loop task contract from runtime setup through completion.
+- [Evidence Gate](references/evidence_gate.md): citation, grounding, and refusal requirements.
+- [Question Rules](references/question_rules.md): item-writing and rejection rules.
+- [Module Boundaries](references/module_boundaries.md): responsibility map for scripts and audit scope.
+
+## Setup
+
+- [llama.cpp Runtime](references/llama_cpp.md): ModelScope-first local model setup for Windows, macOS, and Linux.
+- [LlamaIndex/sqlite-vec RAG And MCP](references/llamaindex_mcp.md): strict local LlamaIndex + sqlite-vec hybrid RAG path, optional external CLI/MCP retrieval, provider/base_url export, and audit guardrails.
+- [SQLite Schema](references/sqlite_schema.md): database tables, provenance, fingerprints, reviews, and migrations.
+
+## Sources And Review
+
+- [Audit Workflow](references/audit_workflow.md): source audit, PDF/DOCX checks, and evidence completeness.
+- [Current Affairs](references/current_affairs.md): dated online material collection and freshness rules.
+- [Style And Difficulty](references/style_difficulty.md): style profile, cognitive level, and difficulty calibration.
+- [Acceptance Checklist](references/acceptance_checklist.md): reusable validation scenarios and evaluation points.
+
+## Local Scripts
+
+- [CLI Wrapper](scripts/senior_exam_writer.py): command entrypoint.
+- [Managed Batch Runner](scripts/run_batch.py): one-command batch path that prepares prompts, auto-starts loopback llama.cpp embeddings, ingests sources, audits duplicates, and stops the temporary server.
+- [Runtime Initializer](scripts/init_modelscope_runtime.py): ModelScope GGUF discovery/download and llama-server command generation.
+- [Provider Env Export](scripts/export_provider_env.py): exports OpenAI-compatible env vars from current Codex provider config for third-party tools.
+- [LlamaIndex RAG Wrapper](scripts/llamaindex_rag.py): optional llamaindex-cli wrapper with explicit provider/base_url env and local JSON result caching.
+- [LlamaIndex sqlite-vec RAG](scripts/llamaindex_sqlite_vec_rag.py): mandatory local RAG script for LlamaIndex file loading, node splitting, llama.cpp embeddings, sqlite-vec vector storage, FTS5+vector hybrid retrieval, and source chunk hit reporting.
+- [Library Modules](scripts/senior_exam_writer_lib/): parsing, ingest, retrieval, planning, generation, validation, review, and persistence modules.
+- [Prepare Pipeline](scripts/senior_exam_writer_lib/prepare_pipeline.py): no-embedding batch preparation for prompt packages, source manifests, and next commands.
+- [Source Archive](scripts/senior_exam_writer_lib/source_archive.py): file-type connector hints and original source archiving with relative directory structure.
+
+## Notes
+
+- Keep this map short and link-only. Add details to referenced files instead of duplicating them here.
+- Use local file reads against this map before loading large references.
+- Runtime evidence retrieval is vector-first against SQLite `embedding_json`; strict local source-file RAG uses LlamaIndex + sqlite-vec vectors with FTS5 only as hybrid lexical recall, and any external LlamaIndex/MCP results must remain auditable.

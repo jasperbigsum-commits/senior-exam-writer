@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-PYTEST_TMP_ROOT = SKILL_ROOT / ".pytest_tmp"
-PYTEST_CACHE_DIR = SKILL_ROOT / ".pytest_cache_local"
+PYTEST_TMP_ROOT = Path(tempfile.gettempdir()) / "senior-exam-writer-pytest" / "tmp"
+PYTEST_CACHE_DIR = Path(tempfile.gettempdir()) / "senior-exam-writer-pytest" / "cache"
 SCRIPTS_DIR = SKILL_ROOT / "scripts"
 
 PYTEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)

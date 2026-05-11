@@ -124,6 +124,13 @@ When refusing:
 - Keep expected answer scope bounded by retrieved material.
 - Tie scoring points to the requested cognitive level: recall, understand, apply, analyze, evaluate, or create.
 
+## Calculation Rules
+
+- Provide givens, answer, complete solution steps, and a formula reference.
+- Each solution step must cite evidence for the formula, definition, theorem, or rule being applied.
+- Keep numerical assumptions inside the stem; do not invent textbook facts outside retrieved evidence.
+- Difficulty should reflect formula complexity, number of steps, interpretation burden, and whether concepts are combined.
+
 ## Verification Rules
 
 Static verification fails when:
@@ -147,6 +154,7 @@ Script policy verification additionally fails when:
 - `--llm-verify` is not enabled;
 - choice items lack `option_audit` for every option;
 - short-answer items lack cited `scoring_points`;
+- calculation items lack cited `solution_steps` or `formula_reference`;
 - material-analysis items lack `material`;
 - item count, question type, difficulty, or coverage target does not match the task request;
 - a reviewer attempts to approve refused or unverified output;

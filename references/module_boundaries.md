@@ -75,9 +75,10 @@ Use this reference when auditing whether `循证出题官` follows the single-re
 
 `scripts/senior_exam_writer_lib/retrieval.py`
 
-- Owns query tokenization, FTS/BM25 retrieval, vector scoring, route hints, parent expansion, evidence ranking, and evidence JSON rendering.
+- Owns vector-only retrieval against stored `embedding_json`, parent expansion, evidence ranking, and evidence JSON rendering.
 - Does not generate question text.
 - Does not approve weak evidence; it only returns candidates and metadata.
+- Does not own a separate vector database or framework index by default; SQLite remains the source of truth. Optional LlamaIndex/MCP results must be cached and mapped back to auditable source locators before use.
 
 `scripts/senior_exam_writer_lib/historical_review.py`
 
@@ -140,7 +141,7 @@ The Skill is audit-ready when:
 - each item-level `evidence_roles` object contains only `core`, `background`, `specification`, `prior_style`, and `qa`, and those IDs match the cited evidence source kinds;
 - duplicate chunks are blocked or explicitly allowed by operator choice and recorded when blocked;
 - each item contains assertions, citations, evidence roles, knowledge points, coverage target, style profile, difficulty rationale, de-duplication check, and verification status;
-- the CLI refuses generation without a valid task, required indexed sources, fingerprinted chunks, answer-supporting evidence, and LLM verification;
+- the CLI refuses generation without a valid task, required indexed sources, fingerprinted chunks, answer-supporting evidence, and verification;
 - the CLI refuses approval of refused or unverified outputs and blocks approval when `audit-question-similarity` returns `blocked_duplicate` or `revise_required`;
 - the CLI refuses task completion until approved items satisfy coverage and knowledge-point uniqueness;
 - refused generations include missing evidence and strongest retrieved snippets;
@@ -169,6 +170,6 @@ The core boundary is clear enough for local audited use:
 Residual risks:
 
 - PDF extraction quality depends on the PDF text layer.
-- LLM verification quality depends on the local model.
+- Optional LLM verification quality depends on the local model when the legacy script-driven generation path is used.
 - Source quality policy still depends on user/course-approved source lists.
 - `collect-urls` downloads approved URLs but does not independently rank search results.

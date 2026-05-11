@@ -208,6 +208,8 @@ def infer_requirement_hints(text: str) -> dict[str, str]:
         question_type = "multiple_choice"
     elif _has_any(text, ["简答", "short answer", "short_answer"]):
         question_type = "short_answer"
+    elif _has_any(text, ["计算题", "计算", "calculation", "calculation_question"]):
+        question_type = "calculation"
     elif _has_any(text, ["材料分析", "material analysis", "material_analysis"]):
         question_type = "material_analysis"
 

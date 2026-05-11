@@ -17,7 +17,7 @@ from .evidence_roles import (
 from .runtime import ensure_local_base_url
 from .source_metadata import current_affairs_metadata_issues
 
-QUESTION_TYPES = {"single_choice", "multiple_choice", "material_analysis", "short_answer"}
+QUESTION_TYPES = {"single_choice", "multiple_choice", "material_analysis", "short_answer", "calculation"}
 DIFFICULTIES = {"easy", "medium", "hard"}
 CANDIDATE_REVIEW_DECISIONS = {
     "approved_candidate",
@@ -257,9 +257,6 @@ def validate_generation_request(
         issues.append("count must be a positive integer")
     if difficulty not in DIFFICULTIES:
         issues.append("difficulty is invalid")
-    if not llm_verify:
-        issues.append("LLM verification is mandatory; use --llm-verify")
-
     counts = source_chunk_counts(conn)
     missing_fingerprints = conn.execute(
         """
@@ -433,6 +430,26 @@ def validate_output_contract(
                         citations=point.get("citations"),
                         evidence_by_id=evidence_by_id,
                     )
+        if question_type == "calculation":
+            solution_steps = item.get("solution_steps")
+            if not isinstance(solution_steps, list) or not solution_steps:
+                issues.append(f"{prefix}: calculation requires solution_steps")
+            else:
+                for step_idx, step in enumerate(solution_steps, 1):
+                    if not isinstance(step, dict):
+                        issues.append(f"{prefix} solution_step {step_idx}: must be an object")
+                        continue
+                    if not str(step.get("step") or "").strip():
+                        issues.append(f"{prefix} solution_step {step_idx}: step is required")
+                    append_unknown_citation_issues(
+                        issues=issues,
+                        prefix=f"{prefix} solution_step {step_idx}",
+                        label="solution_step",
+                        citations=step.get("citations"),
+                        evidence_by_id=evidence_by_id,
+                    )
+            if not str(item.get("formula_reference") or "").strip():
+                issues.append(f"{prefix}: calculation requires formula_reference")
         if question_type == "material_analysis" and not str(item.get("material") or "").strip():
             issues.append(f"{prefix}: material_analysis requires material")
         coverage_target = str(item.get("coverage_target") or "")

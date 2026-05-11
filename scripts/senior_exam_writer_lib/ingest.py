@@ -63,11 +63,6 @@ def insert_chunk(
             now_iso(),
         ),
     )
-    conn.execute("DELETE FROM chunks_fts WHERE chunk_id = ?", (chunk_id,))
-    conn.execute(
-        "INSERT INTO chunks_fts(chunk_id, title, path, text) VALUES (?, ?, ?, ?)",
-        (chunk_id, title, path, text),
-    )
 
 def insert_unique_chunk(
     conn: sqlite3.Connection,
@@ -138,8 +133,6 @@ def delete_source_tree(conn: sqlite3.Connection, source_id: str) -> None:
         row["id"]
         for row in conn.execute("SELECT id FROM chunks WHERE source_id = ?", (source_id,)).fetchall()
     ]
-    for chunk_id in chunk_ids:
-        conn.execute("DELETE FROM chunks_fts WHERE chunk_id = ?", (chunk_id,))
     conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
 
 def ingest_file(

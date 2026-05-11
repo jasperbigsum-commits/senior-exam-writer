@@ -62,6 +62,8 @@ def build_generation_prompt(
                 "citations": ["E1", "E2"],
                 "assertions": [{"claim": "...", "citations": ["E1"]}],
                 "scoring_points": [{"point": "... for short_answer", "citations": ["E1"], "score": 2}],
+                "solution_steps": [{"step": "... for calculation", "citations": ["E1"], "formula": "..."}],
+                "formula_reference": "formula or definition cited from evidence for calculation",
                 "knowledge_points": ["one precise, non-duplicated tested knowledge point"],
                 "coverage_target": "coverage node or learning objective from task/outline",
                 "difficulty": difficulty,
@@ -99,7 +101,7 @@ def build_generation_prompt(
 3. 不要输出 evidence 中没有的事实。
 4. current_affairs 证据必须保留来源、日期、URL或文件定位；若可能过时，为题目设置 valid_until 或在 analysis 中说明复检要求。
 5. 每道题写 evidence_roles，键必须覆盖 core、background、specification、prior_style、qa；每个 evidence id 必须放入与 evidence.role 对应的键。角色映射：{json.dumps(ITEM_ROLE_TO_EVIDENCE_ROLE, ensure_ascii=False)}。不要让 background_current_affairs 单独支撑教材知识点答案；prior_question_style 不得作为 factual support。
-6. 选择题必须写 option_audit，逐项说明 correct/incorrect、错因和引用；简答题必须写 scoring_points，逐评分点引用证据；材料分析题必须写 material 且材料来自证据。
+6. 选择题必须写 option_audit，逐项说明 correct/incorrect、错因和引用；简答题必须写 scoring_points，逐评分点引用证据；计算题必须写 solution_steps 和 formula_reference，每步引用证据；材料分析题必须写 material 且材料来自证据。
 7. 每道题写 style_profile 和 difficulty_rationale；难度不得只凭感觉，必须说明依据：大纲/章节要求、证据数量、概念关系、推理步数、是否涉及应用或分析。
 8. 出题风格：题干清楚、条件充分、无无意歧义；选项语法平行、长度相近、只有一个最佳答案；解析按证据解释，不写空泛套话。
 9. 每道题必须写 knowledge_points，粒度要精确到“本题实际考查的概念/事实/能力点”，不得写宽泛章节名。
@@ -176,6 +178,11 @@ def verify_static(output: dict[str, Any], evidence: list[Evidence]) -> dict[str,
             issues.append(f"{prefix}: missing option_audit")
         if qtype == "short_answer" and "scoring_points" not in item:
             issues.append(f"{prefix}: missing scoring_points")
+        if qtype == "calculation":
+            if "solution_steps" not in item:
+                issues.append(f"{prefix}: missing solution_steps")
+            if not item.get("formula_reference"):
+                issues.append(f"{prefix}: missing formula_reference")
         if qtype == "material_analysis" and not item.get("material"):
             issues.append(f"{prefix}: material_analysis requires material")
         knowledge_points = item.get("knowledge_points")

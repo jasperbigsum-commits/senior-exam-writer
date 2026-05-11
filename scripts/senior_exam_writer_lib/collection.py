@@ -6,6 +6,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import Message
 from html import unescape
 from pathlib import Path
 from typing import Any
@@ -94,13 +95,42 @@ def fetch_url(url: str, timeout: int, user_agent: str) -> tuple[bytes, str | Non
         raise RuntimeError(f"cannot download {url}: {exc}") from exc
     return payload, content_type, final_url
 
+def charset_from_content_type(content_type: str | None) -> str | None:
+    if not content_type:
+        return None
+    message = Message()
+    message["content-type"] = content_type
+    charset = message.get_content_charset()
+    if charset:
+        return charset
+    match = re.search(r"charset\s*=\s*['\"]?([^;'\"]+)", content_type, re.I)
+    return match.group(1).strip() if match else None
+
+def decode_text_bytes(raw: bytes, content_type: str | None = None) -> str:
+    candidates = []
+    declared = charset_from_content_type(content_type)
+    if declared:
+        candidates.append(declared)
+    candidates.extend(["utf-8", "gb18030"])
+    tried: set[str] = set()
+    for encoding in candidates:
+        normalized = encoding.lower()
+        if normalized in tried:
+            continue
+        tried.add(normalized)
+        try:
+            return raw.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
 def text_from_download(path: Path, raw: bytes, content_type: str | None) -> tuple[str, dict[str, Any]]:
     ctype = (content_type or "").lower()
     try:
         if path.suffix.lower() in {".docx", ".pdf", ".epub"}:
             parts = load_document(path)
             return normalize_ws("\n".join(text for _, text in parts)), {}
-        decoded = raw.decode("utf-8", errors="replace")
+        decoded = decode_text_bytes(raw, content_type)
         if "html" in ctype or re.search(r"<html|<!doctype html", decoded[:1000], re.I):
             return html_to_text(decoded), {}
         if path.suffix.lower() in {".json", ".jsonl"}:
@@ -195,7 +225,7 @@ def collect_urls(
         extracted_text, extra_meta = text_from_download(raw_path, raw, content_type)
         html_meta = {}
         if raw_path.suffix == ".txt":
-            decoded = raw.decode("utf-8", errors="replace")
+            decoded = decode_text_bytes(raw, content_type)
             if "html" in (content_type or "").lower() or re.search(r"<html|<!doctype html", decoded[:1000], re.I):
                 html_meta = extract_html_metadata(decoded, final_url)
         domain = urllib.parse.urlparse(final_url).netloc

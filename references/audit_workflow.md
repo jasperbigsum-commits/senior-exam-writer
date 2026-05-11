@@ -35,13 +35,13 @@ Use this reference to explain how `循证出题官` handles a PDF, DOCX, Markdow
    - Citations are formed from source title or source name, heading path, URL/file path, date, page, paragraph, or chunk locator.
 
 5. Index for retrieval.
-   - SQLite FTS5 provides keyword/BM25 retrieval.
-   - Optional llama.cpp embeddings provide semantic retrieval.
+   - Local llama.cpp embeddings provide the vector retrieval path.
+   - FTS5/BM25 is not used in the evidence path.
    - Retrieval can work without embeddings, but audit quality is higher with a Chinese-capable local embedding model.
 
 6. Block duplicate knowledge before retrieval.
    - Each chunk is normalized and fingerprinted.
-   - Exact duplicates and high-similarity near duplicates are not inserted into `chunks` or `chunks_fts`.
+   - Exact duplicates and high-similarity near duplicates are not inserted into `chunks`.
    - When embeddings are enabled, semantic duplicates can also be blocked by cosine similarity.
    - Duplicate blocking is parent-first: if a parent section is duplicate, its children are skipped rather than counted as separate duplicate rows.
    - Blocked duplicates are stored in `ingest_duplicates` with the candidate id, original chunk id, similarity, reason, source, locator, and text sample.

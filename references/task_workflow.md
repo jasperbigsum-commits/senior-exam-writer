@@ -19,14 +19,21 @@ An exam-writing task may include:
 ## Required Flow
 
 1. Initialize the local runtime and create or update an exam task.
+   - Prefer `run_batch.py` for first-run batch workflows; it auto-starts a temporary loopback embedding server, chooses a free local port, probes Chinese embeddings, ingests sources, audits duplicates, and stops the server.
    - Use `init-runtime` before collection, planning, generation, or review.
-   - Embedding and generation URLs must be local loopback endpoints.
+   - The embedding URL must be a local loopback endpoint.
+   - `init-runtime` must functionally probe the embedding endpoint with Chinese text. A root URL response alone is not enough.
+   - Prefer ModelScope-hosted GGUF models for reachable setup in China-facing environments; the embedding server must use a Chinese-friendly embedding model, not a chat model.
+   - Do not require a local generation model when Codex/agent is the writer and reviewer. A local LLM is optional only for legacy script-driven generation or offline second-pass verification.
+   - If model download, startup, or health check fails, stop the workflow. Do not create a half-indexed evidence database and do not continue to planning or generation.
+   - If embedding is not deployed yet, use `prepare-pipeline` only for deterministic batch preparation: requirement splitting, local source parse checks, prompt stage files, source manifests, and next-command scripts. This mode does not produce usable evidence.
    - When the entry request is natural language, use `split-requirements` first to produce stage prompts for task definition, source collection, planning, writers, reviewers, similarity review, and final approval.
    - Store outline, source policy, proposition rules, requirements, and coverage plan in `exam_tasks`.
    - Use `create-task`; do not leave core requirements only in chat memory.
    - Script gate: `outline`, `source_policy`, `question_rules`, `requirements`, and `coverage` must be non-empty JSON objects. Citations, review, and knowledge-point de-duplication must be explicitly enabled.
 
 2. Classify and ingest sources.
+   - During `prepare-pipeline`, copy original files into `original_sources/` while preserving relative directory structure, and record file-type connector hints in `source_manifest.json`.
    - `syllabus` / `outline`: exam scope and cognitive-level calibration.
    - `exam_rules` / `requirements`: hard constraints for item style and output.
    - `question_bank`: style, distribution, common traps, not copyable source text.
@@ -34,6 +41,9 @@ An exam-writing task may include:
    - `book` / `handout` / `notes`: core course evidence.
    - `current_affairs`: dated background material.
    - `historical_exam`: prior real exam items for duplicate review and style signals only.
+   - Ingestion requires local embeddings. `--no-embed` is a policy error for real evidence-gated workflows.
+   - Do not use no-embedding preparation output as citations. It becomes usable only after `ingest --embed`, `plan-evidence`, and evidence gates pass.
+   - If any file fails to parse or embed, stop and fix the source/runtime; do not proceed to later sources, planning, candidates, generation, or review.
 
 3. Collect online material into reusable local files before ingestion.
    - Use `collect-urls` for current-affairs/background sources.
@@ -42,7 +52,7 @@ An exam-writing task may include:
 
 4. De-duplicate the knowledge base before retrieval.
    - Every ingested chunk gets a normalized fingerprint.
-   - Exact or near-duplicate chunks are blocked from `chunks` and `chunks_fts`.
+   - Exact or near-duplicate chunks are blocked from `chunks`.
    - When `--embed` is enabled, high-similarity embedding matches are also blocked as semantic duplicates.
    - Duplicate blocking is parent-first: if an entire parent section is duplicate, child chunks are not inserted or counted separately.
    - Blocked duplicates are stored in `ingest_duplicates` with source, candidate id, duplicate target, similarity, reason, and sample text.
@@ -55,9 +65,13 @@ An exam-writing task may include:
    - Use `plan-evidence` to bind knowledge points to evidence points.
    - Knowledge-point matching and evidence-point generation may run in parallel when sources are already indexed.
    - Missing evidence is routed to evidence backfill instead of repeated prompt loops.
+   - `plan-evidence` requires every chunk in SQLite to have `embedding_json`; unembedded chunks block planning.
 
 6. Retrieve before generating.
-   - Retrieval combines TOC/overview routing, BM25, optional llama.cpp embeddings, and parent-context expansion.
+   - Retrieval is vector-only: local llama.cpp query embeddings rank against stored `embedding_json`, then child hits expand to parent chunks for context.
+   - Do not use FTS5/BM25 in the evidence path; keyword matches must not override semantic evidence ranking.
+   - LlamaIndex CLI/MCP retrieval is optional. It may be used when explicitly requested, but provider/base URL must be configured explicitly, results must be cached locally, and source locators must map back into the audit trail.
+   - Do not add a separate vector database or framework-maintained index as the default source of truth; SQLite remains the auditable evidence store unless the user explicitly chooses an external backend.
    - Evidence is role-labeled as `exam_specification`, `core_course_evidence`, `prior_question_style`, `supplemental_qa_evidence`, or `background_current_affairs`.
 
 7. Collect extra real-time/current-affairs material only when needed.
@@ -67,11 +81,12 @@ An exam-writing task may include:
 
 8. Generate under task constraints.
    - `generate --task-id` passes the stored outline, rules, requirements, coverage plan, and prior accepted/unrejected knowledge points to the writer.
-   - `generate-candidates` fans out one planning unit to multiple writers so candidates can be compared before promotion.
+   - `generate-candidates` fans out one planning unit to multiple writers so candidates can be compared before promotion; it requires `evidence_status=strong`, a vectorized corpus, and a live local embedding endpoint.
    - Each item must include `knowledge_points`, `coverage_target`, `style_profile`, `difficulty_rationale`, citations, assertions, evidence roles, and `dedup_check`.
    - Choice items must include `option_audit`; short-answer items must include `scoring_points`; material-analysis items must include `material`.
    - Question-bank sources may guide style and common pitfalls, but generated items must not copy previous items.
    - Script gate: generation requires `--task-id`, task-valid source policy, indexed required sources, evidence from answer-supporting source kinds, and `--llm-verify`.
+   - Script gate: generation also requires a live local embedding endpoint and zero unembedded chunks in the database. The legacy script-driven `generate` command additionally requires a local LLM because it calls a model itself.
 
 9. Verify and reject weak output.
    - Evidence gate blocks thin or unlocatable evidence.

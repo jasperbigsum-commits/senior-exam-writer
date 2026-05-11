@@ -63,20 +63,25 @@ def llama_chat(
         "max_tokens": max_tokens,
         "stream": False,
     }
+    prompt = "\n\n".join(f"{m['role'].upper()}:\n{m['content']}" for m in messages)
+    first_error: Exception | None = None
     try:
         data = http_json(f"{base}/v1/chat/completions", payload, timeout=300)
-        return data["choices"][0]["message"]["content"]
-    except Exception as first_error:
-        prompt = "\n\n".join(f"{m['role'].upper()}:\n{m['content']}" for m in messages)
-        fallback_payload = {
-            "prompt": prompt,
-            "temperature": temperature,
-            "n_predict": max_tokens,
-            "stream": False,
-        }
-        try:
-            data = http_json(f"{base}/completion", fallback_payload, timeout=300)
-        except Exception as second_error:
-            raise RuntimeError(f"generation failed: {first_error}; fallback failed: {second_error}") from second_error
-        return data.get("content", "")
-
+        content = data["choices"][0]["message"].get("content") or ""
+        if content.strip():
+            return content
+        first_error = RuntimeError("chat completion returned empty content")
+    except Exception as exc:
+        first_error = exc
+    fallback_payload = {
+        "prompt": prompt,
+        "temperature": temperature,
+        "n_predict": max_tokens,
+        "stream": False,
+    }
+    try:
+        data = http_json(f"{base}/completion", fallback_payload, timeout=300)
+    except Exception as second_error:
+        first_message = first_error or "chat completion was not attempted"
+        raise RuntimeError(f"generation failed: {first_message}; fallback failed: {second_error}") from second_error
+    return data.get("content", "")

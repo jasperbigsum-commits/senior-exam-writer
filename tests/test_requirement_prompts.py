@@ -42,6 +42,12 @@ def test_prompt_package_jsonl_has_one_stage_per_line() -> None:
     assert json.loads(lines[0])["stage"] == "task_definition"
 
 
+def test_requirement_prompt_package_detects_calculation_questions() -> None:
+    package = build_requirement_prompt_package("生成4道经济统计学计算题，要求完整解题步骤。")
+
+    assert package["hints"]["question_type"] == "calculation"
+
+
 def test_cli_split_requirements_writes_json_and_jsonl(tmp_path, capsys) -> None:
     json_path = tmp_path / "prompts.json"
     jsonl_path = tmp_path / "prompts.jsonl"

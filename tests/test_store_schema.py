@@ -29,6 +29,21 @@ def test_unknown_source_kind_is_rejected() -> None:
         raise AssertionError("Unsupported source kind should raise ValueError")
 
 
+def test_schema_does_not_create_fts_virtual_table(tmp_path) -> None:
+    db_path = tmp_path / "schema.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_db(conn)
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'chunks_fts'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is None
+
+
 def test_extended_review_tables_exist() -> None:
     conn = sqlite3.connect(":memory:")
     try:

@@ -49,14 +49,6 @@ def init_db(conn: sqlite3.Connection) -> None:
           created_at TEXT NOT NULL
         );
 
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-          chunk_id UNINDEXED,
-          title,
-          path,
-          text,
-          tokenize = 'unicode61'
-        );
-
         CREATE TABLE IF NOT EXISTS questions (
           id TEXT PRIMARY KEY,
           topic TEXT NOT NULL,
@@ -239,6 +231,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_candidate_questions_columns(conn)
     _ensure_candidate_reviews_columns(conn)
     _ensure_similarity_review_columns(conn)
+    _drop_legacy_chunks_fts(conn)
     conn.commit()
 
 
@@ -387,6 +380,10 @@ def _ensure_similarity_review_columns(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_hits_audit ON question_similarity_hits(audit_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_audits_task ON question_similarity_audits(task_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_similarity_audits_result ON question_similarity_audits(audit_result)")
+
+
+def _drop_legacy_chunks_fts(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS chunks_fts")
 
 
 def _table_sql(conn: sqlite3.Connection, table_name: str) -> str:
